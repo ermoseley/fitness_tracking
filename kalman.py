@@ -65,6 +65,10 @@ class WeightKalmanFilter:
         # Measurement model and noise
         self.H = np.array([[1.0, 0.0]], dtype=float)
         self.R = np.array([[self.measurement_noise]], dtype=float)
+        # Adaptive measurement noise (EWMA on innovation variance)
+        self.R_adapt = float(self.measurement_noise)
+        self.R_alpha = 0.05
+        self.adaptive_measurement_noise = True
         
         # Expose a convenience dataclass mirror for external access
         self.state = KalmanState(
@@ -109,6 +113,14 @@ class WeightKalmanFilter:
         # Innovation
         z = np.array([[float(measurement)]], dtype=float)
         y = z - self.H @ self.x.reshape(-1, 1)
+        # Adapt measurement noise from innovation statistics (pre-update)
+        if self.adaptive_measurement_noise:
+            # S_est ≈ y^2, so R_est ≈ S_est - HPH^T
+            S_est = float(y @ y.T)
+            HPH = float(self.H @ self.P @ self.H.T)
+            R_est = max(1e-8, S_est - HPH)
+            self.R_adapt = (1.0 - self.R_alpha) * self.R_adapt + self.R_alpha * R_est
+            self.R = np.array([[self.R_adapt]], dtype=float)
         S = self.H @ self.P @ self.H.T + self.R
         K = self.P @ self.H.T @ np.linalg.inv(S)
         

@@ -338,7 +338,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--half-life-days", type=float, default=7.0, help="Half-life for time weighting in regression. Default: 7")
     parser.add_argument("--no-plot", action="store_true", help="Do not generate plot image")
     parser.add_argument("--output", default="weight_trend.png", help="Output plot image path. Default: weight_trend.png")
-    parser.add_argument("--kalman-plot", action="store_true", help="Generate Kalman filter plot (kalman_weight_trend.png)")
+    parser.add_argument("--no-kalman-plot", action="store_true", help="Do not generate Kalman filter plot")
     parser.add_argument("--print-table", action="store_true", help="Print table of date, weight, EMA")
     # Body fat baseline parameters (used only when --kalman-plot is enabled)
     parser.add_argument("--bf-baseline-lean", type=float, default=150.0,
@@ -395,7 +395,7 @@ def main() -> None:
     print(f"  per day:  {slope_per_day:+.4f}")
     print(f"  per week: {slope_per_week:+.3f}")
     print(f"  per month:{slope_per_month:+.3f}")
-    print(f"Calorie deficit: {7*slope_per_day*3500:+.3f} calories/week")
+    print(f"Calorie deficit: {slope_per_day*3500:+.3f} calories/day")
 
     if args.print_table:
         print("\nDate,Weight,EMA")
@@ -410,15 +410,15 @@ def main() -> None:
             print(f"Failed to render plot: {e}")
     
     # Generate Kalman filter plot if requested
-    if args.kalman_plot:
+    if not args.no_kalman_plot:
         try:
             # Run Kalman filter
             kalman_states, kalman_dates = run_kalman_filter(entries)
             
             if kalman_states:
                 # Create Kalman filter plot
-                create_kalman_plot(entries, kalman_states, kalman_dates, "kalman_weight_trend.png")
-                print("Kalman filter plot saved to: kalman_weight_trend.png")
+                create_kalman_plot(entries, kalman_states, kalman_dates, args.output)
+                print("Kalman filter plot saved to: weight_trend.png")
                 
                 # Create body fat plot using Kalman smoothing
                 from kalman import create_bodyfat_plot_from_kalman
@@ -429,9 +429,9 @@ def main() -> None:
                         kalman_dates,
                         baseline_weight_lb=args.bf_baseline_weight,
                         baseline_lean_lb=args.bf_baseline_lean,
-                        output_path="kalman_bodyfat_trend.png",
+                        output_path="bodyfat_trend.png",
                     )
-                    print("Body fat plot saved to: kalman_bodyfat_trend.png")
+                    print("Body fat plot saved to: bodyfat_trend.png")
                 except Exception as e:
                     print(f"Failed to generate body fat plot: {e}")
                 
@@ -440,7 +440,7 @@ def main() -> None:
                 print(f"\n=== Kalman Filter Summary ===")
                 print(f"Current weight estimate: {latest_kalman.weight:.2f} ± {1.96 * (latest_kalman.weight_var**0.5):.2f}")
                 print(f"Current rate: {7*latest_kalman.velocity:+.3f} lbs/week")
-                print(f"Calorie deficit: {7*latest_kalman.velocity*3500:+.3f} calories/week")
+                print(f"Calorie deficit: {latest_kalman.velocity*3500:+.3f} calories/day")
                 
                 # Calculate forecasts
                 from kalman import WeightKalmanFilter
