@@ -31,7 +31,10 @@ class WeightKalmanFilter:
                  initial_velocity: float = 0.0,
                  process_noise_weight: float = 0.01,
                  process_noise_velocity: float = 0.001,
-                 measurement_noise: float = 0.5):
+                 process_noise_offdiag: float = 0.0,
+                 measurement_noise: float = 0.5,
+                 initial_weight_var: Optional[float] = None,
+                 initial_velocity_var: float = 0.25):
         """
         Initialize Kalman filter
         
@@ -42,28 +45,35 @@ class WeightKalmanFilter:
             process_noise_velocity: Process noise for velocity (variance per day)
             measurement_noise: Measurement noise variance
         """
-        self.measurement_noise = measurement_noise
+        self.measurement_noise = float(measurement_noise)
         
-        # Initial state
+        # Process noise matrix per day (2x2), allow off-diagonal coupling
+        self.Q_day = np.array([
+            [process_noise_weight, process_noise_offdiag],
+            [process_noise_offdiag, process_noise_velocity]
+        ], dtype=float)
+        
+        # State vector and covariance matrix (matrix form)
+        self.x = np.array([float(initial_weight), float(initial_velocity)], dtype=float)
+        if initial_weight_var is None:
+            initial_weight_var = float(self.measurement_noise)
+        self.P = np.array([
+            [float(initial_weight_var), 0.0],
+            [0.0, float(initial_velocity_var)]
+        ], dtype=float)
+        
+        # Measurement model and noise
+        self.H = np.array([[1.0, 0.0]], dtype=float)
+        self.R = np.array([[self.measurement_noise]], dtype=float)
+        
+        # Expose a convenience dataclass mirror for external access
         self.state = KalmanState(
-            weight=initial_weight,
-            velocity=initial_velocity,
-            weight_var=1.0,  # Initial uncertainty
-            velocity_var=0.1,  # Initial velocity uncertainty
-            weight_velocity_cov=0.0
+            weight=float(self.x[0]),
+            velocity=float(self.x[1]),
+            weight_var=float(self.P[0, 0]),
+            velocity_var=float(self.P[1, 1]),
+            weight_velocity_cov=float(self.P[0, 1])
         )
-        
-        # Process noise matrix (per day)
-        self.Q = np.array([
-            [process_noise_weight, 0.0],
-            [0.0, process_noise_velocity]
-        ])
-        
-        # Measurement matrix (we only measure weight)
-        self.H = np.array([[1.0, 0.0]])
-        
-        # Measurement noise
-        self.R = np.array([[measurement_noise]])
     
     def predict(self, dt_days: float) -> None:
         """
@@ -76,35 +86,18 @@ class WeightKalmanFilter:
         F = np.array([
             [1.0, dt_days],
             [0.0, 1.0]
-        ])
+        ], dtype=float)
         
-        # Predict state
-        new_weight = self.state.weight + self.state.velocity * dt_days
-        new_velocity = self.state.velocity
+        # Predict state and covariance (matrix form)
+        self.x = F @ self.x
+        self.P = F @ self.P @ F.T + self.Q_day * float(dt_days)
         
-        # Predict covariance
-        F_T = F.T
-        new_weight_var = (F[0, 0]**2 * self.state.weight_var + 
-                         F[0, 1]**2 * self.state.velocity_var + 
-                         2 * F[0, 0] * F[0, 1] * self.state.weight_velocity_cov)
-        new_velocity_var = (F[1, 0]**2 * self.state.weight_var + 
-                           F[1, 1]**2 * self.state.velocity_var + 
-                           2 * F[1, 0] * F[1, 1] * self.state.weight_velocity_cov)
-        new_cov = (F[0, 0] * F[1, 0] * self.state.weight_var + 
-                   F[0, 1] * F[1, 1] * self.state.velocity_var + 
-                   F[0, 0] * F[1, 1] * self.state.weight_velocity_cov + 
-                   F[0, 1] * F[1, 0] * self.state.weight_velocity_cov)
-        
-        # Add process noise
-        new_weight_var += self.Q[0, 0] * dt_days
-        new_velocity_var += self.Q[1, 1] * dt_days
-        
-        # Update state
-        self.state.weight = new_weight
-        self.state.velocity = new_velocity
-        self.state.weight_var = new_weight_var
-        self.state.velocity_var = new_velocity_var
-        self.state.weight_velocity_cov = new_cov
+        # Mirror to convenience dataclass
+        self.state.weight = float(self.x[0])
+        self.state.velocity = float(self.x[1])
+        self.state.weight_var = float(self.P[0, 0])
+        self.state.velocity_var = float(self.P[1, 1])
+        self.state.weight_velocity_cov = float(self.P[0, 1])
     
     def update(self, measurement: float) -> None:
         """
@@ -114,29 +107,23 @@ class WeightKalmanFilter:
             measurement: New weight measurement
         """
         # Innovation
-        y = measurement - self.state.weight
-        S = self.state.weight_var + self.measurement_noise
+        z = np.array([[float(measurement)]], dtype=float)
+        y = z - self.H @ self.x.reshape(-1, 1)
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ np.linalg.inv(S)
         
-        # Kalman gain
-        K_weight = self.state.weight_var / S
-        K_velocity = self.state.weight_velocity_cov / S
+        # State update
+        self.x = (self.x.reshape(-1, 1) + K @ y).flatten()
+        I = np.eye(2)
+        # Joseph form for numerical stability
+        self.P = (I - K @ self.H) @ self.P @ (I - K @ self.H).T + K @ self.R @ K.T
         
-        # Update state
-        self.state.weight += K_weight * y
-        self.state.velocity += K_velocity * y
-        
-        # Update covariance
-        K = np.array([[K_weight], [K_velocity]])
-        I_KH = np.eye(2) - K @ self.H
-        
-        new_cov = I_KH @ np.array([
-            [self.state.weight_var, self.state.weight_velocity_cov],
-            [self.state.weight_velocity_cov, self.state.velocity_var]
-        ])
-        
-        self.state.weight_var = new_cov[0, 0]
-        self.state.velocity_var = new_cov[1, 1]
-        self.state.weight_velocity_cov = new_cov[0, 1]
+        # Mirror to convenience dataclass
+        self.state.weight = float(self.x[0])
+        self.state.velocity = float(self.x[1])
+        self.state.weight_var = float(self.P[0, 0])
+        self.state.velocity_var = float(self.P[1, 1])
+        self.state.weight_velocity_cov = float(self.P[0, 1])
     
     def forecast(self, days_ahead: float) -> Tuple[float, float]:
         """
@@ -149,20 +136,22 @@ class WeightKalmanFilter:
             (forecasted_weight, forecasted_std)
         """
         # Work on a copy so we do not mutate the original state object
-        original = self.state
-        sim = KalmanState(
-            weight=original.weight,
-            velocity=original.velocity,
-            weight_var=original.weight_var,
-            velocity_var=original.velocity_var,
-            weight_velocity_cov=original.weight_velocity_cov,
-        )
-        # Temporarily point to the copy, run predict, then restore
-        self.state = sim
+        # Copy state and covariance for simulation
+        x0 = self.x.copy()
+        P0 = self.P.copy()
+        # Predict forward
         self.predict(days_ahead)
-        forecast_weight = float(self.state.weight)
-        forecast_std = float(np.sqrt(max(self.state.weight_var, 0.0)))
-        self.state = original
+        forecast_weight = float(self.x[0])
+        forecast_std = float(np.sqrt(max(self.P[0, 0], 0.0)))
+        # Restore
+        self.x = x0
+        self.P = P0
+        # Keep mirror consistent
+        self.state.weight = float(self.x[0])
+        self.state.velocity = float(self.x[1])
+        self.state.weight_var = float(self.P[0, 0])
+        self.state.velocity_var = float(self.P[1, 1])
+        self.state.weight_velocity_cov = float(self.P[0, 1])
         return forecast_weight, forecast_std
 
 
@@ -276,28 +265,31 @@ def interpolate_kalman_states(states,
         velocities = [s.velocity for s in states]
         weight_stds = [np.sqrt(s.weight_var) for s in states]
     
-    # Create cubic splines
+    # Create splines: prefer PCHIP for stds to keep non-negativity/shape
     try:
         weight_spline = CubicSpline(t_original, weights, bc_type='natural')
         velocity_spline = CubicSpline(t_original, velocities, bc_type='natural')
-        std_spline = CubicSpline(t_original, weight_stds, bc_type='natural')
-        
+        try:
+            from scipy.interpolate import PchipInterpolator  # type: ignore
+            std_spline_fn = PchipInterpolator(t_original, weight_stds)
+            interpolated_stds = std_spline_fn(t_target)
+        except Exception:
+            std_spline = CubicSpline(t_original, weight_stds, bc_type='natural')
+            interpolated_stds = std_spline(t_target)
+
         # Interpolate
         interpolated_weights = weight_spline(t_target)
         interpolated_velocities = velocity_spline(t_target)
-        interpolated_stds = std_spline(t_target)
-        
-        # Ensure we have numpy arrays for consistent handling
+
+        # Ensure numpy arrays
         if not isinstance(interpolated_weights, np.ndarray):
             interpolated_weights = np.array(interpolated_weights)
         if not isinstance(interpolated_velocities, np.ndarray):
             interpolated_velocities = np.array(interpolated_velocities)
         if not isinstance(interpolated_stds, np.ndarray):
             interpolated_stds = np.array(interpolated_stds)
-        
     except Exception as e:
-        print(f"Warning: Cubic spline failed ({e}), falling back to linear interpolation")
-        # Fallback to linear interpolation
+        print(f"Warning: Spline failed ({e}), falling back to linear interpolation")
         interpolated_weights = np.interp(t_target, t_original, weights)
         interpolated_velocities = np.interp(t_target, t_original, velocities)
         interpolated_stds = np.interp(t_target, t_original, weight_stds)
@@ -424,10 +416,17 @@ def create_kalman_plot(entries,
     
     # Calculate forecasts
     kf = WeightKalmanFilter(
-        initial_weight=states[0].weight,
-        initial_velocity=states[0].velocity
+        initial_weight=latest_state.weight,
+        initial_velocity=latest_state.velocity,
+        initial_weight_var=latest_state.weight_var,
+        initial_velocity_var=latest_state.velocity_var,
     )
-    kf.state = latest_state
+    # Set full covariance including off-diagonal from latest state
+    kf.x = np.array([latest_state.weight, latest_state.velocity], dtype=float)
+    kf.P = np.array([
+        [latest_state.weight_var, latest_state.weight_velocity_cov],
+        [latest_state.weight_velocity_cov, latest_state.velocity_var],
+    ], dtype=float)
     
     # Forecast 1 week and 1 month ahead
     week_forecast, week_std = kf.forecast(7.0)
@@ -616,16 +615,18 @@ def create_bodyfat_plot_from_kalman(
     bf_slope_per_week = 7.0 * bf_slope_per_day
 
     # Forecasts: transform Kalman weight forecasts through the body fat model (mid scenario)
-    from kalman import WeightKalmanFilter, KalmanState
-    kf = WeightKalmanFilter(initial_weight=states[0].weight, initial_velocity=states[0].velocity)
-    # Use a copy of latest state
-    kf.state = KalmanState(
-        weight=states[-1].weight,
-        velocity=states[-1].velocity,
-        weight_var=states[-1].weight_var,
-        velocity_var=states[-1].velocity_var,
-        weight_velocity_cov=states[-1].weight_velocity_cov,
+    from kalman import WeightKalmanFilter
+    kf = WeightKalmanFilter(
+        initial_weight=states[-1].weight,
+        initial_velocity=states[-1].velocity,
+        initial_weight_var=states[-1].weight_var,
+        initial_velocity_var=states[-1].velocity_var,
     )
+    kf.x = np.array([states[-1].weight, states[-1].velocity], dtype=float)
+    kf.P = np.array([
+        [states[-1].weight_var, states[-1].weight_velocity_cov],
+        [states[-1].weight_velocity_cov, states[-1].velocity_var],
+    ], dtype=float)
 
     # 1 week forecast
     w_week, w_week_std = kf.forecast(7.0)
