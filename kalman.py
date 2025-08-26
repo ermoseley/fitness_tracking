@@ -376,7 +376,8 @@ def compute_kalman_mean_std_spline(states, dates) -> Tuple[List[datetime], List[
 def create_kalman_plot(entries, 
                       states, 
                       dates,
-                      output_path: str) -> None:
+                      output_path: str,
+                      no_display: bool = False) -> None:
     """
     Create Kalman filter plot with raw data, filtered state, and confidence bands
     
@@ -468,7 +469,10 @@ Forecasts:
     plt.tight_layout()
     
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    plt.close()
+    if no_display:
+        plt.close()
+    else:
+        plt.show()
 
 
 def _compute_bodyfat_pct_from_weight(
@@ -511,6 +515,7 @@ def create_bodyfat_plot_from_kalman(
     baseline_weight_lb: Optional[float],
     baseline_lean_lb: float,
     output_path: str = "kalman_bodyfat_trend.png",
+    no_display: bool = False,
 ) -> None:
     """
     Create Estimated Body Fat % vs Date plot using Kalman-smoothed weights.
@@ -687,4 +692,7 @@ def create_bodyfat_plot_from_kalman(
     plt.legend()
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close()
+    if no_display:
+        plt.close()
+    else:
+        plt.show()

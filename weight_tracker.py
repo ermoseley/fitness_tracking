@@ -345,6 +345,7 @@ def parse_args() -> argparse.Namespace:
                         help="Baseline lean mass in lb (default: 150.0)")
     parser.add_argument("--bf-baseline-weight", type=float, default=None,
                         help="Baseline total weight in lb (default: first Kalman mean)")
+    parser.add_argument("--no-display", action="store_true", help="Do not display plots in a GUI")
     return parser.parse_args()
 
 
@@ -417,7 +418,7 @@ def main() -> None:
             
             if kalman_states:
                 # Create Kalman filter plot
-                create_kalman_plot(entries, kalman_states, kalman_dates, args.output)
+                create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display)
                 print("Kalman filter plot saved to: weight_trend.png")
                 
                 # Create body fat plot using Kalman smoothing
@@ -430,6 +431,7 @@ def main() -> None:
                         baseline_weight_lb=args.bf_baseline_weight,
                         baseline_lean_lb=args.bf_baseline_lean,
                         output_path="bodyfat_trend.png",
+                        no_display=args.no_display,
                     )
                     print("Body fat plot saved to: bodyfat_trend.png")
                 except Exception as e:
