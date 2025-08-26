@@ -10,6 +10,9 @@ from typing import List, Tuple, Optional, Dict
 
 import numpy as np
 
+# Import Kalman filter functionality
+from kalman import run_kalman_filter, create_kalman_plot
+
 
 # ---------------------------
 # Data structures
@@ -335,7 +338,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--half-life-days", type=float, default=7.0, help="Half-life for time weighting in regression. Default: 7")
     parser.add_argument("--no-plot", action="store_true", help="Do not generate plot image")
     parser.add_argument("--output", default="weight_trend.png", help="Output plot image path. Default: weight_trend.png")
+    parser.add_argument("--kalman-plot", action="store_true", help="Generate Kalman filter plot (kalman_weight_trend.png)")
     parser.add_argument("--print-table", action="store_true", help="Print table of date, weight, EMA")
+    # Body fat baseline parameters (used only when --kalman-plot is enabled)
+    parser.add_argument("--bf-baseline-lean", type=float, default=150.0,
+                        help="Baseline lean mass in lb (default: 150.0)")
+    parser.add_argument("--bf-baseline-weight", type=float, default=None,
+                        help="Baseline total weight in lb (default: first Kalman mean)")
     return parser.parse_args()
 
 
@@ -386,6 +395,7 @@ def main() -> None:
     print(f"  per day:  {slope_per_day:+.4f}")
     print(f"  per week: {slope_per_week:+.3f}")
     print(f"  per month:{slope_per_month:+.3f}")
+    print(f"Calorie deficit: {7*slope_per_day*3500:+.3f} calories/week")
 
     if args.print_table:
         print("\nDate,Weight,EMA")
@@ -398,6 +408,54 @@ def main() -> None:
             print(f"Plot saved to: {args.output}")
         except Exception as e:
             print(f"Failed to render plot: {e}")
+    
+    # Generate Kalman filter plot if requested
+    if args.kalman_plot:
+        try:
+            # Run Kalman filter
+            kalman_states, kalman_dates = run_kalman_filter(entries)
+            
+            if kalman_states:
+                # Create Kalman filter plot
+                create_kalman_plot(entries, kalman_states, kalman_dates, "kalman_weight_trend.png")
+                print("Kalman filter plot saved to: kalman_weight_trend.png")
+                
+                # Create body fat plot using Kalman smoothing
+                from kalman import create_bodyfat_plot_from_kalman
+                try:
+                    create_bodyfat_plot_from_kalman(
+                        entries,
+                        kalman_states,
+                        kalman_dates,
+                        baseline_weight_lb=args.bf_baseline_weight,
+                        baseline_lean_lb=args.bf_baseline_lean,
+                        output_path="kalman_bodyfat_trend.png",
+                    )
+                    print("Body fat plot saved to: kalman_bodyfat_trend.png")
+                except Exception as e:
+                    print(f"Failed to generate body fat plot: {e}")
+                
+                # Print Kalman filter summary
+                latest_kalman = kalman_states[-1]
+                print(f"\n=== Kalman Filter Summary ===")
+                print(f"Current weight estimate: {latest_kalman.weight:.2f} ± {1.96 * (latest_kalman.weight_var**0.5):.2f}")
+                print(f"Current rate: {7*latest_kalman.velocity:+.3f} lbs/week")
+                print(f"Calorie deficit: {7*latest_kalman.velocity*3500:+.3f} calories/week")
+                
+                # Calculate forecasts
+                from kalman import WeightKalmanFilter
+                kf = WeightKalmanFilter(initial_weight=kalman_states[0].weight)
+                kf.state = latest_kalman
+                
+                week_forecast, week_std = kf.forecast(7.0)
+                month_forecast, month_std = kf.forecast(30.0)
+                
+                print(f"1-week forecast: {week_forecast:.2f} ± {1.96 * week_std:.2f}")
+                print(f"1-month forecast: {month_forecast:.2f} ± {1.96 * month_std:.2f}")
+            else:
+                print("No data available for Kalman filter")
+        except Exception as e:
+            print(f"Failed to generate Kalman filter plot: {e}")
 
 
 if __name__ == "__main__":
