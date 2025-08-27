@@ -1,0 +1,46 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build artifacts and distributions
+dist/
+build/
+*.spec
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# macOS specific
+.DS_Store
+*.app/
+.AppleDouble
+.LSOverride
+Icon
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Generated images and data
+weight_trend.png
+bodyfat_trend.png
+kalman_weight_trend.png
