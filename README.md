@@ -1,6 +1,6 @@
 # Weight Tracker
 
-A Python application for tracking weight measurements with advanced analytics including Exponential Moving Average (EMA), time-weighted linear regression, and Kalman filtering.
+A Python application for tracking weight measurements with advanced analytics including Exponential Moving Average (EMA), time-weighted linear regression, and Kalman filtering. Features both command-line and graphical user interfaces.
 
 ## Features
 
@@ -8,6 +8,8 @@ A Python application for tracking weight measurements with advanced analytics in
 - **Weight Entry Management**: Add weight entries with flexible date formats
 - **CSV Storage**: Persistent storage in CSV format
 - **Flexible Date Parsing**: Supports multiple date formats (YYYY-MM-DD, MM/DD/YYYY, etc.)
+- **Date Range Filtering**: Plot specific time periods while using all data for analysis
+- **LBM Integration**: Optional lean body mass tracking with interpolation
 
 ### Analytics
 - **Time-Aware EMA**: Exponential Moving Average that accounts for irregular sampling intervals
@@ -17,6 +19,8 @@ A Python application for tracking weight measurements with advanced analytics in
 ### Visualization
 - **Standard Weight Trend Plot**: Shows raw data, EMA curve, and regression line
 - **Kalman Filter Plot**: Displays filtered state estimates with confidence intervals and forecasts
+- **Body Fat Estimation**: Multiple scenarios (0%, 10%, 20% lean mass loss) or LBM-driven calculations
+- **Date Range Control**: Focus on specific time periods with `--start` and `--end` options
 
 ## Installation
 
