@@ -6,6 +6,7 @@ from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
 from scipy.interpolate import CubicSpline
 import matplotlib.pyplot as plt
+import csv
 
 
 @dataclass
@@ -485,6 +486,60 @@ def compute_kalman_mean_std_spline(states, dates) -> Tuple[List[datetime], List[
     return dense_datetimes, [float(v) for v in dense_mean], [float(max(float(s), 0.0)) for s in dense_std]
 
 
+def _load_lbm_csv(path: str) -> List[Tuple[date, float]]:
+    points: List[Tuple[date, float]] = []
+    try:
+        with open(path, "r", newline="") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if not row:
+                    continue
+                try:
+                    d_str = str(row[0]).strip()
+                    v_str = str(row[1]).strip()
+                    d = datetime.fromisoformat(d_str).date()
+                    v = float(v_str)
+                except Exception:
+                    # skip header or bad rows
+                    continue
+                points.append((d, v))
+    except Exception:
+        return []
+    points.sort(key=lambda p: p[0])
+    return points
+
+
+def _evaluate_lbm_series(target_datetimes: List[datetime], lbm_points: List[Tuple[date, float]]) -> List[float]:
+    if not lbm_points:
+        return [0.0 for _ in target_datetimes]
+    # Build lists of datetimes and values
+    pts_dt = [datetime.combine(d, datetime.min.time()) for d, _ in lbm_points]
+    pts_val = [float(v) for _, v in lbm_points]
+
+    # For each target time, piecewise linear interpolate; constant after last point
+    out: List[float] = []
+    for t in target_datetimes:
+        if t <= pts_dt[0]:
+            out.append(pts_val[0])
+            continue
+        if t >= pts_dt[-1]:
+            out.append(pts_val[-1])
+            continue
+        # find the interval
+        idx = 1
+        while idx < len(pts_dt) and not (pts_dt[idx-1] <= t <= pts_dt[idx]):
+            idx += 1
+        if idx >= len(pts_dt):
+            out.append(pts_val[-1])
+            continue
+        t0, t1 = pts_dt[idx-1], pts_dt[idx]
+        v0, v1 = pts_val[idx-1], pts_val[idx]
+        # linear interpolation
+        span = (t1 - t0).total_seconds()
+        alpha = 0.0 if span <= 0 else (t - t0).total_seconds() / span
+        out.append((1.0 - alpha) * v0 + alpha * v1)
+    return out
+
 def create_kalman_plot(entries, 
                       states, 
                       dates,
@@ -664,6 +719,7 @@ def create_bodyfat_plot_from_kalman(
     no_display: bool = False,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    lbm_csv: Optional[str] = None,
 ) -> None:
     """
     Create Estimated Body Fat % vs Date plot using Kalman-smoothed weights.
@@ -717,44 +773,78 @@ def create_bodyfat_plot_from_kalman(
     if baseline_weight_lb is None:
         baseline_weight_lb = float(dense_means[0])
 
-    # Scenario fractions
-    s_low = 0.0
-    s_mid = 0.10
-    s_high = 0.20
+    # If an LBM CSV is provided, drive body fat computations directly from LBM
+    if lbm_csv:
+        lbm_points = _load_lbm_csv(lbm_csv)
+        if not lbm_points:
+            # Fall back to original model if LBM file empty/unreadable
+            lbm_csv = None
 
-    # Midline body fat from smoothed weights
-    bf_mid = _compute_bodyfat_pct_from_weight(
-        dense_means, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
-    )
+    if lbm_csv:
+        # Build LBM series at dense times and entry times
+        dense_lbm = _evaluate_lbm_series(dense_datetimes, lbm_points)
+        # Body fat midline using provided LBM
+        bf_mid = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, w))))))
+                  for w, l in zip(dense_means, dense_lbm)]
 
-    # Confidence band for midline: evaluate transformation at W±z*std
-    z = 1.96
-    w_lo = [max(1e-6, m - z * s) for m, s in zip(dense_means, dense_stds)]
-    w_hi = [m + z * s for m, s in zip(dense_means, dense_stds)]
-    bf_mid_lo = _compute_bodyfat_pct_from_weight(
-        w_lo, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
-    )
-    bf_mid_hi = _compute_bodyfat_pct_from_weight(
-        w_hi, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
-    )
-    # Ensure lower <= upper at each point
-    bf_band_lower = [min(a, b) for a, b in zip(bf_mid_lo, bf_mid_hi)]
-    bf_band_upper = [max(a, b) for a, b in zip(bf_mid_lo, bf_mid_hi)]
+        # Confidence band: BF(W±z*std) with LBM fixed
+        z = 1.96
+        w_lo = [max(1e-6, m - z * s) for m, s in zip(dense_means, dense_stds)]
+        w_hi = [m + z * s for m, s in zip(dense_means, dense_stds)]
+        bf_mid_lo = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, wl))))))
+                     for wl, l in zip(w_lo, dense_lbm)]
+        bf_mid_hi = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, wh))))))
+                     for wh, l in zip(w_hi, dense_lbm)]
+        bf_band_lower = [min(a, b) for a, b in zip(bf_mid_lo, bf_mid_hi)]
+        bf_band_upper = [max(a, b) for a, b in zip(bf_mid_lo, bf_mid_hi)]
 
-    # Scenario bounds using smoothed means
-    bf_lower_bound = _compute_bodyfat_pct_from_weight(
-        dense_means, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_low
-    )
-    bf_upper_bound = _compute_bodyfat_pct_from_weight(
-        dense_means, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_high
-    )
+        # Entry points BF from entries and interpolated LBM
+        entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
+        entry_weights = [float(e.weight) for e in filtered_entries]
+        entry_lbm = _evaluate_lbm_series(entry_datetimes, lbm_points)
+        entry_bf_mid = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, w))))))
+                        for w, l in zip(entry_weights, entry_lbm)]
+        show_scenarios = False
+    else:
+        # Scenario fractions
+        s_low = 0.0
+        s_mid = 0.10
+        s_high = 0.20
 
-    # Scatter points for actual measurements under mid scenario
-    entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
-    entry_weights = [float(e.weight) for e in filtered_entries]
-    entry_bf_mid = _compute_bodyfat_pct_from_weight(
-        entry_weights, entry_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
-    )
+        # Midline body fat from smoothed weights
+        bf_mid = _compute_bodyfat_pct_from_weight(
+            dense_means, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
+        )
+
+        # Confidence band for midline: evaluate transformation at W±z*std
+        z = 1.96
+        w_lo = [max(1e-6, m - z * s) for m, s in zip(dense_means, dense_stds)]
+        w_hi = [m + z * s for m, s in zip(dense_means, dense_stds)]
+        bf_mid_lo = _compute_bodyfat_pct_from_weight(
+            w_lo, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
+        )
+        bf_mid_hi = _compute_bodyfat_pct_from_weight(
+            w_hi, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
+        )
+        # Ensure lower <= upper at each point
+        bf_band_lower = [min(a, b) for a, b in zip(bf_mid_lo, bf_mid_hi)]
+        bf_band_upper = [max(a, b) for a, b in zip(bf_mid_lo, bf_mid_hi)]
+
+        # Scenario bounds using smoothed means
+        bf_lower_bound = _compute_bodyfat_pct_from_weight(
+            dense_means, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_low
+        )
+        bf_upper_bound = _compute_bodyfat_pct_from_weight(
+            dense_means, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_high
+        )
+
+        # Scatter points for actual measurements under mid scenario
+        entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
+        entry_weights = [float(e.weight) for e in filtered_entries]
+        entry_bf_mid = _compute_bodyfat_pct_from_weight(
+            entry_weights, entry_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
+        )
+        show_scenarios = True
 
     # Plot
     import matplotlib
@@ -770,11 +860,12 @@ def create_bodyfat_plot_from_kalman(
         color="#cccccc", alpha=0.4, label="Midline 95% CI"
     )
 
-    # Scenario bounds
-    plt.plot(dense_datetimes, bf_lower_bound, "--", color="#2ca02c", linewidth=1.8,
-             label="Lower bound (0% lean loss)")
-    plt.plot(dense_datetimes, bf_upper_bound, "--", color="#d62728", linewidth=1.8,
-             label="Upper bound (20% lean loss)")
+    # Optional scenario bounds (only when not using external LBM)
+    if show_scenarios:
+        plt.plot(dense_datetimes, bf_lower_bound, "--", color="#2ca02c", linewidth=1.8,
+                 label="Lower bound (0% lean loss)")
+        plt.plot(dense_datetimes, bf_upper_bound, "--", color="#d62728", linewidth=1.8,
+                 label="Upper bound (20% lean loss)")
 
     # Midline
     plt.plot(dense_datetimes, bf_mid, "-", color="#1f77b4", linewidth=2.4,
@@ -810,7 +901,7 @@ def create_bodyfat_plot_from_kalman(
             bf_slope_per_day = 0.0
     bf_slope_per_week = 7.0 * bf_slope_per_day
 
-    # Forecasts: transform Kalman weight forecasts through the body fat model (mid scenario)
+    # Forecasts: transform Kalman weight forecasts through BF model
     from kalman import WeightKalmanFilter
     kf = WeightKalmanFilter(
         initial_weight=states[-1].weight,
@@ -824,29 +915,31 @@ def create_bodyfat_plot_from_kalman(
         [states[-1].weight_velocity_cov, states[-1].velocity_var],
     ], dtype=float)
 
+    # Helper to compute BF at a future offset
+    def _bf_from_weight_at_offset(days_fwd: float, w: float, w_std: float) -> Tuple[float, float]:
+        future_dt = dense_datetimes[-1] + timedelta(days=days_fwd)
+        if lbm_csv:
+            future_lbm = _evaluate_lbm_series([future_dt], lbm_points)[0]
+            bf_mid_val = float(max(0.0, min(100.0, 100.0 * (1.0 - (future_lbm / max(1e-6, w))))))
+            w_lo_f = max(1e-6, w - 1.96 * w_std)
+            w_hi_f = w + 1.96 * w_std
+            bf_lo_val = float(max(0.0, min(100.0, 100.0 * (1.0 - (future_lbm / max(1e-6, w_lo_f))))))
+            bf_hi_val = float(max(0.0, min(100.0, 100.0 * (1.0 - (future_lbm / max(1e-6, w_hi_f))))))
+        else:
+            s_mid = 0.10
+            bf_mid_val = _compute_bodyfat_pct_from_weight([w], [future_dt], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
+            bf_lo_val = _compute_bodyfat_pct_from_weight([max(1e-6, w - 1.96 * w_std)], [future_dt], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
+            bf_hi_val = _compute_bodyfat_pct_from_weight([w + 1.96 * w_std], [future_dt], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
+        halfwidth = float(max(bf_hi_val - bf_mid_val, bf_mid_val - bf_lo_val))
+        return bf_mid_val, halfwidth
+
     # 1 week forecast
     w_week, w_week_std = kf.forecast(7.0)
-    bf_week_mid = _compute_bodyfat_pct_from_weight([w_week], [dense_datetimes[-1] + timedelta(days=7)],
-                                                  baseline_weight_lb, baseline_lean_lb, s_mid)[0]
-    bf_week_lo = _compute_bodyfat_pct_from_weight([max(1e-6, w_week - 1.96 * w_week_std)],
-                                                  [dense_datetimes[-1] + timedelta(days=7)],
-                                                  baseline_weight_lb, baseline_lean_lb, s_mid)[0]
-    bf_week_hi = _compute_bodyfat_pct_from_weight([w_week + 1.96 * w_week_std],
-                                                  [dense_datetimes[-1] + timedelta(days=7)],
-                                                  baseline_weight_lb, baseline_lean_lb, s_mid)[0]
-    bf_week_halfwidth = float(max(bf_week_hi - bf_week_mid, bf_week_mid - bf_week_lo))
+    bf_week_mid, bf_week_halfwidth = _bf_from_weight_at_offset(7.0, w_week, w_week_std)
 
     # 1 month forecast (30 days)
     w_month, w_month_std = kf.forecast(30.0)
-    bf_month_mid = _compute_bodyfat_pct_from_weight([w_month], [dense_datetimes[-1] + timedelta(days=30)],
-                                                   baseline_weight_lb, baseline_lean_lb, s_mid)[0]
-    bf_month_lo = _compute_bodyfat_pct_from_weight([max(1e-6, w_month - 1.96 * w_month_std)],
-                                                   [dense_datetimes[-1] + timedelta(days=30)],
-                                                   baseline_weight_lb, baseline_lean_lb, s_mid)[0]
-    bf_month_hi = _compute_bodyfat_pct_from_weight([w_month + 1.96 * w_month_std],
-                                                   [dense_datetimes[-1] + timedelta(days=30)],
-                                                   baseline_weight_lb, baseline_lean_lb, s_mid)[0]
-    bf_month_halfwidth = float(max(bf_month_hi - bf_month_mid, bf_month_mid - bf_month_lo))
+    bf_month_mid, bf_month_halfwidth = _bf_from_weight_at_offset(30.0, w_month, w_month_std)
 
     # Stats box text
     stats_text = (
