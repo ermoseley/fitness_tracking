@@ -609,12 +609,12 @@ def create_kalman_plot(entries,
     # Fill confidence bands with anti-aliasing for smooth curves
     plt.fill_between(dense_datetimes, lower_band, upper_band, 
                      alpha=0.3, color='gray', label='95% Confidence Interval',
-                     antialiased=True, linewidth=0)
+                     antialiased=True, linewidth=0,zorder=6)
     
     # Plot filtered/smoothed state mean with anti-aliasing for smooth curves
     plt.plot(dense_datetimes, dense_means, '-', color='#ff7f0e', 
              linewidth=2, label=label, 
-             antialiased=True, solid_capstyle='round')
+             antialiased=True, solid_capstyle='round',zorder=7)
     
     # Plot raw data
     raw_weights = [e.weight for e in filtered_entries]

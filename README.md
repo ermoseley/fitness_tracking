@@ -1,170 +1,206 @@
 # Weight Tracker
 
-A Python application for tracking weight measurements with advanced analytics including Exponential Moving Average (EMA), time-weighted linear regression, and Kalman filtering. Features both command-line and graphical user interfaces.
+A comprehensive weight and body composition tracking application with advanced analytics, trend analysis, and beautiful visualizations.
+
+## 🎉 **NEW: macOS App Bundle Ready!**
+
+Your Weight Tracker is now available as a native macOS `.app` bundle that can be double-clicked to run without opening the terminal!
+
+**Quick Start:**
+```bash
+# The app bundle is already built and ready!
+open dist/WeightTracker.app
+```
 
 ## Features
 
-### Core Functionality
-- **Weight Entry Management**: Add weight entries with flexible date formats
-- **CSV Storage**: Persistent storage in CSV format
-- **Flexible Date Parsing**: Supports multiple date formats (YYYY-MM-DD, MM/DD/YYYY, etc.)
-- **Date Range Filtering**: Plot specific time periods while using all data for analysis
-- **LBM Integration**: Optional lean body mass tracking with interpolation
+- **Weight Tracking**: Log and monitor your weight over time
+- **Body Fat Analysis**: Track lean body mass and body fat percentage
+- **Advanced Analytics**: Exponential moving averages and regression analysis
+- **Kalman Filtering**: Noise reduction for cleaner trend visualization
+- **CSV Import/Export**: Easy data management and backup
+- **Beautiful Charts**: Professional-grade visualizations using matplotlib
+- **Cross-Platform**: Works on macOS, Windows, and Linux
+- **Native macOS App**: Professional app bundle with custom icon
 
-### Analytics
-- **Time-Aware EMA**: Exponential Moving Average that accounts for irregular sampling intervals
-- **Time-Weighted Linear Regression**: Regression analysis with exponential decay weighting
-- **Kalman Filter**: Advanced state estimation with uncertainty quantification
+## Quick Start
 
-### Visualization
-- **Standard Weight Trend Plot**: Shows raw data, EMA curve, and regression line
-- **Kalman Filter Plot**: Displays filtered state estimates with confidence intervals and forecasts
-- **Body Fat Estimation**: Multiple scenarios (0%, 10%, 20% lean mass loss) or LBM-driven calculations
-- **Date Range Control**: Focus on specific time periods with `--start` and `--end` options
+### Option 1: macOS App Bundle (Recommended for Users) ✅
+The app bundle is already built and ready to use!
+
+```bash
+# Run the app (no installation needed)
+open dist/WeightTracker.app
+
+# Or install permanently
+# Drag dist/WeightTracker.app to your Applications folder
+```
+
+**Features of the App Bundle:**
+- 🚀 **Double-click to run** - No terminal required
+- 🎨 **Custom icon** - Uses your WeightTracker.icns
+- 📱 **Native macOS integration** - Appears in Applications and Launchpad
+- 🔒 **Self-contained** - Includes all Python dependencies
+- 📦 **Professional packaging** - 384MB complete application
+
+### Option 2: Run from Source (Development)
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the GUI application
+python gui.py
+
+# Or run the command-line version
+python weight_tracker.py --help
+```
+
+## Building the macOS App
+
+The build process creates a completely self-contained application that includes all Python dependencies and can run without a terminal.
+
+### Prerequisites
+- Python 3.8 or later
+- macOS 10.15 (Catalina) or later
+
+### Build Commands
+
+**Simple Build (Recommended):**
+```bash
+./build.sh
+```
+
+**Manual Build:**
+```bash
+python build_simple.py
+```
+
+**Alternative Simple Build:**
+```bash
+./create_app_bundle.sh
+```
+
+### What Gets Built
+
+1. **WeightTracker.app** - A proper macOS app bundle
+2. **Self-contained** - Includes all Python dependencies
+3. **Native Icon** - Uses your custom WeightTracker.icns icon
+4. **No Terminal Required** - Double-click to run
 
 ## Installation
 
-### Requirements
-- Python 3.6+
-- Required packages (install via pip):
-  ```bash
-  pip install numpy matplotlib scipy
-  ```
+### For End Users
+1. **Download** the built `WeightTracker.app`
+2. **Drag and Drop** to your Applications folder
+3. **Launch** from Applications or Spotlight
 
-### Setup
-1. Clone or download the repository
-2. Install dependencies: `pip install numpy matplotlib scipy`
-3. Run the application: `python weight_tracker.py --help`
+### For Developers
+1. **Clone** the repository
+2. **Install** dependencies: `pip install -r requirements.txt`
+3. **Build** the app: `./build.sh`
+4. **Test** the app bundle
 
-## Usage
+## Data Management
 
-### Basic Commands
+### CSV Files
+- **weights.csv**: Weight entries with dates
+- **lbm.csv**: Lean body mass entries (optional)
 
-```bash
-# View help
-python weight_tracker.py --help
-
-# Add a weight entry
-python weight_tracker.py --add "2025-08-26:189.2"
-
-# Generate standard plot
-python weight_tracker.py
-
-# Generate Kalman filter plot
-python weight_tracker.py --kalman-plot
-
-# Generate both plots
-python weight_tracker.py --kalman-plot
-
-# Print data table
-python weight_tracker.py --print-table
-
-# Use custom CSV file
-python weight_tracker.py --csv my_weights.csv
+### Data Format
+```csv
+2025-01-15,190.5
+2025-01-16,190.2
+2025-01-17,189.8
 ```
 
-### Command Line Options
+### Importing Data
+- Use the GUI to browse and select CSV files
+- Supports multiple date formats
+- Automatic header detection
 
-- `--csv PATH`: Specify CSV file path (default: weights.csv)
-- `--add DATE:WEIGHT`: Add weight entry (can be used multiple times)
-- `--ema-days DAYS`: EMA span in days (default: 7)
-- `--half-life-days DAYS`: Half-life for regression weighting (default: 7)
-- `--no-plot`: Skip standard plot generation
-- `--output PATH`: Output plot path (default: weight_trend.png)
-- `--kalman-plot`: Generate Kalman filter plot (kalman_weight_trend.png)
-- `--print-table`: Print CSV-style data table
+## Advanced Features
 
-## Kalman Filter Features
+### Kalman Filtering
+- **Smoother Mode**: Post-processing for historical data
+- **Filter Mode**: Real-time processing
+- **Noise Reduction**: Cleaner trend visualization
 
-The Kalman filter implementation provides:
-
-### State Estimation
-- **Weight Estimate**: Current weight with uncertainty bounds
-- **Rate of Change**: Velocity (lbs/day) with uncertainty
-- **Covariance Tracking**: Full state uncertainty matrix
-
-### Forecasting
-- **1-Week Forecast**: Weight prediction with confidence interval
-- **1-Month Forecast**: Extended prediction with uncertainty
-- **Dynamic Uncertainty**: Uncertainty grows with forecast horizon
+### Trend Analysis
+- **Exponential Moving Averages**: Smooth trend lines
+- **Linear Regression**: Long-term trajectory
+- **Statistical Analysis**: Confidence intervals
 
 ### Visualization
-- **Filtered State Curve**: Smooth cubic spline interpolation
-- **Confidence Bands**: 95% confidence intervals (greyed out)
-- **Raw Data Overlay**: Original measurements for comparison
-- **Stats Box**: Current estimates, rates, and forecasts
-
-## File Structure
-
-```
-fitness_tracking/
-├── weight_tracker.py    # Main application
-├── kalman.py           # Kalman filter implementation
-├── weights.csv         # Weight data storage
-├── weight_trend.png    # Standard trend plot
-└── kalman_weight_trend.png  # Kalman filter plot
-```
-
-## Technical Details
-
-### Kalman Filter Model
-- **State Vector**: [weight, velocity]
-- **Process Model**: Constant velocity with process noise
-- **Measurement Model**: Direct weight measurement
-- **Noise Parameters**: Configurable process and measurement noise
-
-### Interpolation
-- **Cubic Splines**: Smooth curves between state estimates
-- **Daily Grid**: Dense interpolation for visualization
-- **Fallback Methods**: Linear interpolation if splines fail
-
-### Uncertainty Propagation
-- **Covariance Prediction**: Full uncertainty matrix updates
-- **Time Scaling**: Process noise scales with time intervals
-- **Confidence Intervals**: 1.96 × standard deviation (95% confidence)
-
-## Examples
-
-### Adding Multiple Entries
-```bash
-python weight_tracker.py \
-  --add "2025-08-26:189.2" \
-  --add "2025-08-27:188.8" \
-  --add "2025-08-28:189.0"
-```
-
-### Custom Analysis Parameters
-```bash
-python weight_tracker.py \
-  --ema-days 14 \
-  --half-life-days 10 \
-  --kalman-plot
-```
-
-### Data Export
-```bash
-python weight_tracker.py --print-table > weight_data.csv
-```
+- **Weight Trends**: Time series with trend lines
+- **Body Fat Analysis**: Composition over time
+- **Export Options**: High-resolution PNG charts
 
 ## Troubleshooting
 
 ### Common Issues
-- **Import Errors**: Ensure all dependencies are installed
-- **Plot Generation**: Check matplotlib backend compatibility
-- **Date Parsing**: Use ISO format (YYYY-MM-DD) for best compatibility
 
-### Performance
-- **Large Datasets**: Kalman filter scales linearly with data size
-- **Memory Usage**: Interpolation creates dense grids for smooth plotting
-- **Computation Time**: Most operations complete in seconds for typical datasets
+**App Won't Launch:**
+- Check macOS security settings
+- Right-click → Open (first time)
+- Verify Python 3.8+ is installed
 
-## Contributing
+**Missing Dependencies:**
+- Run `pip install -r requirements.txt`
+- Ensure all packages are installed
 
-The codebase is designed for extensibility:
-- Add new filter types in separate modules
-- Extend visualization options in plotting functions
-- Implement additional analytics in the main script
+**Build Failures:**
+- Check Python version (3.8+ required)
+- Verify PyInstaller is installed
+- Check available disk space
+
+### Getting Help
+- Check the `INSTALL.md` file for detailed instructions
+- Review build output for error messages
+- Ensure all required files are present
+
+## Development
+
+### Project Structure
+```
+fitness_tracking/
+├── main.py              # App entry point
+├── gui.py               # GUI implementation
+├── weight_tracker.py    # Core functionality
+├── kalman.py           # Kalman filtering
+├── build_simple.py     # Build script
+├── build.sh            # Build shell script
+├── create_app_bundle.sh # Simple app bundle creator
+├── assets/             # Icons and resources
+├── *.csv               # Data files
+├── dist/               # Built app bundle (ready to use!)
+└── requirements.txt    # Dependencies
+```
+
+### Adding Features
+1. **Modify** the appropriate Python module
+2. **Test** with `python gui.py`
+3. **Rebuild** the app: `./build.sh`
+4. **Test** the new app bundle
+
+### Customization
+- **Icons**: Replace files in `assets/`
+- **Styling**: Modify GUI elements in `gui.py`
+- **Analysis**: Extend algorithms in `weight_tracker.py`
 
 ## License
 
-This project is provided as-is for personal use and educational purposes.
+This project is open source. Feel free to modify and distribute according to your needs.
+
+## Contributing
+
+Contributions are welcome! Please:
+1. Test your changes thoroughly
+2. Ensure the app bundle still builds correctly
+3. Update documentation as needed
+4. Follow existing code style
+
+---
+
+**🎉 Your Weight Tracker is now a professional macOS application!**
+
+**Built with ❤️ using Python, Tkinter, and PyInstaller**
