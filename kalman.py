@@ -223,6 +223,118 @@ def run_kalman_filter(entries,
     return states, dates
 
 
+def run_kalman_smoother(entries,
+                        initial_weight: Optional[float] = None,
+                        initial_velocity: float = 0.0) -> Tuple[List[KalmanState], List[date]]:
+    """
+    Run Rauch-Tung-Striebel smoother on weight entries.
+
+    This performs a full forward pass (Kalman filter) while storing the
+    necessary transition and prediction terms, followed by a backward
+    smoothing pass to compute optimal retrospective estimates that use
+    both past and future information.
+
+    Returns:
+        (smoothed_states, dates)
+    """
+    if not entries:
+        return [], []
+
+    # Initialize filter
+    if initial_weight is None:
+        initial_weight = entries[0].weight
+
+    kf = WeightKalmanFilter(
+        initial_weight=initial_weight,
+        initial_velocity=initial_velocity
+    )
+
+    filtered_x_list: List[np.ndarray] = []
+    filtered_P_list: List[np.ndarray] = []
+    dates: List[date] = []
+
+    # Store per-step transitions/predictions for RTS
+    F_list: List[np.ndarray] = []  # state transition from k->k+1
+    x_pred_list: List[np.ndarray] = []  # x_{k+1|k}
+    P_pred_list: List[np.ndarray] = []  # P_{k+1|k}
+
+    prev_date: Optional[date] = None
+
+    for idx, entry in enumerate(entries):
+        if idx == 0:
+            # First update at t0
+            kf.update(entry.weight)
+            filtered_x_list.append(kf.x.copy())
+            filtered_P_list.append(kf.P.copy())
+            dates.append(entry.entry_date)
+            prev_date = entry.entry_date
+            continue
+
+        # Time delta in days (allow zero for repeated same-day entries)
+        dt_days = max(0, (entry.entry_date - prev_date).days if prev_date is not None else 0)
+        # Transition used in predict step
+        F = np.array([[1.0, float(dt_days)], [0.0, 1.0]], dtype=float)
+
+        # Predict to current timestamp and record predicted terms
+        kf.predict(float(dt_days))
+        F_list.append(F)
+        x_pred_list.append(kf.x.copy())
+        P_pred_list.append(kf.P.copy())
+
+        # Measurement update
+        kf.update(entry.weight)
+        filtered_x_list.append(kf.x.copy())
+        filtered_P_list.append(kf.P.copy())
+        dates.append(entry.entry_date)
+        prev_date = entry.entry_date
+
+    n = len(filtered_x_list)
+    if n == 0:
+        return [], []
+
+    # Initialize smoothed estimates with filtered terminal state
+    x_smooth: List[np.ndarray] = [None] * n  # type: ignore
+    P_smooth: List[np.ndarray] = [None] * n  # type: ignore
+    x_smooth[-1] = filtered_x_list[-1].copy()
+    P_smooth[-1] = filtered_P_list[-1].copy()
+
+    # Backward RTS smoothing
+    for k in range(n - 2, -1, -1):
+        Pk = filtered_P_list[k]
+        Fk = F_list[k]
+        P_pred = P_pred_list[k]
+        x_pred = x_pred_list[k]
+
+        # Smoother gain J_k = P_k F_k^T (P_{k+1|k})^{-1}
+        try:
+            P_pred_inv = np.linalg.inv(P_pred)
+        except np.linalg.LinAlgError:
+            P_pred_inv = np.linalg.pinv(P_pred)
+        Jk = Pk @ Fk.T @ P_pred_inv
+
+        # x_k|N = x_k|k + J_k (x_{k+1|N} - x_{k+1|k})
+        delta_x = x_smooth[k + 1] - x_pred
+        x_smooth[k] = filtered_x_list[k] + Jk @ delta_x
+
+        # P_k|N = P_k|k + J_k (P_{k+1|N} - P_{k+1|k}) J_k^T
+        P_smooth[k] = Pk + Jk @ (P_smooth[k + 1] - P_pred) @ Jk.T
+
+    # Convert to KalmanState list
+    smoothed_states: List[KalmanState] = []
+    for xs, Ps in zip(x_smooth, P_smooth):
+        w = float(xs[0])
+        v = float(xs[1])
+        wv = float(Ps[0, 1])
+        smoothed_states.append(KalmanState(
+            weight=w,
+            velocity=v,
+            weight_var=float(max(Ps[0, 0], 0.0)),
+            velocity_var=float(max(Ps[1, 1], 0.0)),
+            weight_velocity_cov=wv,
+        ))
+
+    return smoothed_states, dates
+
 def interpolate_kalman_states(states, 
                             dates,
                             target_dates) -> Tuple[List[float], List[float], List[float]]:
@@ -377,7 +489,10 @@ def create_kalman_plot(entries,
                       states, 
                       dates,
                       output_path: str,
-                      no_display: bool = False) -> None:
+                      no_display: bool = False,
+                      label: str = "Kalman Filter Estimate",
+                      start_date: Optional[date] = None,
+                      end_date: Optional[date] = None) -> None:
     """
     Create Kalman filter plot with raw data, filtered state, and confidence bands
     
@@ -390,9 +505,40 @@ def create_kalman_plot(entries,
     if not entries or not states:
         return
     
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
+        if end_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
+        
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+    
     # Build smooth dense curves exactly like the EMA spline approach (date-based x-axis)
     dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(states, dates)
-    entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in entries]
+    
+    # Filter dense curves by date range if specified
+    if start_date or end_date:
+        filtered_dense_datetimes = []
+        filtered_dense_means = []
+        filtered_dense_stds = []
+        for dt, mean, std in zip(dense_datetimes, dense_means, dense_stds):
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+            filtered_dense_datetimes.append(dt)
+            filtered_dense_means.append(mean)
+            filtered_dense_stds.append(std)
+        dense_datetimes = filtered_dense_datetimes
+        dense_means = filtered_dense_means
+        dense_stds = filtered_dense_stds
+    
+    entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
     
     # Create plot with high-quality settings
     plt.figure(figsize=(12, 8), dpi=100)
@@ -410,13 +556,13 @@ def create_kalman_plot(entries,
                      alpha=0.3, color='gray', label='95% Confidence Interval',
                      antialiased=True, linewidth=0)
     
-    # Plot filtered state mean with anti-aliasing for smooth curves
+    # Plot filtered/smoothed state mean with anti-aliasing for smooth curves
     plt.plot(dense_datetimes, dense_means, '-', color='#ff7f0e', 
-             linewidth=2, label='Kalman Filter Estimate', 
+             linewidth=2, label=label, 
              antialiased=True, solid_capstyle='round')
     
     # Plot raw data
-    raw_weights = [e.weight for e in entries]
+    raw_weights = [e.weight for e in filtered_entries]
     plt.scatter(entry_datetimes, raw_weights, s=50, color='blue', 
                 alpha=0.7, label='Raw Measurements', zorder=5)
     
@@ -516,6 +662,8 @@ def create_bodyfat_plot_from_kalman(
     baseline_lean_lb: float,
     output_path: str = "kalman_bodyfat_trend.png",
     no_display: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
 ) -> None:
     """
     Create Estimated Body Fat % vs Date plot using Kalman-smoothed weights.
@@ -530,10 +678,40 @@ def create_bodyfat_plot_from_kalman(
     if not entries or not states:
         return
 
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
+        if end_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
+        
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+
     # Use smoothed Kalman mean and std over a dense date grid
     dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(states, dates)
     if not dense_datetimes:
         return
+    
+    # Filter dense curves by date range if specified
+    if start_date or end_date:
+        filtered_dense_datetimes = []
+        filtered_dense_means = []
+        filtered_dense_stds = []
+        for dt, mean, std in zip(dense_datetimes, dense_means, dense_stds):
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+            filtered_dense_datetimes.append(dt)
+            filtered_dense_means.append(mean)
+            filtered_dense_stds.append(std)
+        dense_datetimes = filtered_dense_datetimes
+        dense_means = filtered_dense_means
+        dense_stds = filtered_dense_stds
 
     # Baseline defaults: if baseline weight not provided, use first Kalman mean
     if baseline_weight_lb is None:
@@ -572,15 +750,16 @@ def create_bodyfat_plot_from_kalman(
     )
 
     # Scatter points for actual measurements under mid scenario
-    entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in entries]
-    entry_weights = [float(e.weight) for e in entries]
+    entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
+    entry_weights = [float(e.weight) for e in filtered_entries]
     entry_bf_mid = _compute_bodyfat_pct_from_weight(
         entry_weights, entry_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
     )
 
     # Plot
     import matplotlib
-    matplotlib.use("Agg")
+    if no_display:
+        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     plt.figure(figsize=(12, 8), dpi=100)

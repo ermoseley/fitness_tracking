@@ -200,19 +200,32 @@ def fit_time_weighted_linear_regression(entries: List[WeightEntry], half_life_da
 # Plotting
 # ---------------------------
 
-def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema_curve_values: List[float], slope_per_day: float, intercept: float, output_path: str) -> None:
+def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema_curve_values: List[float], slope_per_day: float, intercept: float, output_path: str, no_display: bool = True, start_date: Optional[date] = None, end_date: Optional[date] = None) -> None:
     import matplotlib
-    # Use a non-interactive backend to avoid GUI requirements
-    matplotlib.use("Agg")
+    # Use a non-interactive backend only if we are not displaying
+    if no_display:
+        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     if not entries:
         return
 
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
+        if end_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
+        
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+    
     # Use datetimes for smooth plotting
     from datetime import timedelta
-    dates = [datetime.combine(e.entry_date, datetime.min.time()) for e in entries]
-    y = [e.weight for e in entries]
+    dates = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
+    y = [e.weight for e in filtered_entries]
 
     # Create x values for regression line spanning the visible date range
     t0_dt = dates[0]
@@ -243,8 +256,24 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
         if xs:
             plt.scatter(xs, ys, s=36, color=weekday_colors[wd], label=weekday_names[wd], alpha=0.9, edgecolors="white", linewidths=0.5, zorder=3)
 
+    # Filter EMA curve data to match the date range
+    if start_date or end_date:
+        ema_filtered_dates = []
+        ema_filtered_values = []
+        for dt, val in zip(ema_curve_dates, ema_curve_values):
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+            ema_filtered_dates.append(dt)
+            ema_filtered_values.append(val)
+    else:
+        ema_filtered_dates = ema_curve_dates
+        ema_filtered_values = ema_curve_values
+    
     # EMA curve and regression line
-    plt.plot(ema_curve_dates, ema_curve_values, "-", label="7-day EMA (spline)", color="#ff7f0e", linewidth=2, zorder=2)
+    plt.plot(ema_filtered_dates, ema_filtered_values, "-", label="7-day EMA (spline)", color="#ff7f0e", linewidth=2, zorder=2)
     plt.plot(dense_dates, y_reg, "--", label="Weighted regression", color="#000000", linewidth=2, zorder=1)
 
     plt.title("Weight Trend")
@@ -262,6 +291,10 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
+    if no_display:
+        plt.close()
+    else:
+        plt.show()
 
 
 # ---------------------------
@@ -339,6 +372,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-plot", action="store_true", help="Do not generate plot image")
     parser.add_argument("--output", default="weight_trend.png", help="Output plot image path. Default: weight_trend.png")
     parser.add_argument("--no-kalman-plot", action="store_true", help="Do not generate Kalman filter plot")
+    parser.add_argument("--kalman-mode", choices=["filter", "smoother"], default="smoother",
+                        help="Use forward Kalman filter ('filter') or RTS smoother ('smoother') for historical trend")
     parser.add_argument("--print-table", action="store_true", help="Print table of date, weight, EMA")
     # Body fat baseline parameters (used only when --kalman-plot is enabled)
     parser.add_argument("--bf-baseline-lean", type=float, default=150.0,
@@ -346,6 +381,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bf-baseline-weight", type=float, default=None,
                         help="Baseline total weight in lb (default: first Kalman mean)")
     parser.add_argument("--no-display", action="store_true", help="Do not display plots in a GUI")
+    parser.add_argument("--start", type=str, help="Start date for plotting (YYYY-MM-DD format). If not specified, shows all data from beginning.")
+    parser.add_argument("--end", type=str, help="End date for plotting (YYYY-MM-DD format). If not specified, shows all data to end.")
     return parser.parse_args()
 
 
@@ -403,9 +440,23 @@ def main() -> None:
         for e, ema in zip(entries, ema_values):
             print(f"{e.entry_date},{e.weight:.3f},{ema:.3f}")
 
-    if not args.no_plot:
+    # Parse date range arguments
+    start_date = None
+    end_date = None
+    if args.start:
         try:
-            render_plot(entries, ema_dense_dates, ema_dense_values, slope_per_day, intercept, args.output)
+            start_date = parse_date(args.start)
+        except ValueError as e:
+            print(f"Warning: Could not parse start date '{args.start}': {e}")
+    if args.end:
+        try:
+            end_date = parse_date(args.end)
+        except ValueError as e:
+            print(f"Warning: Could not parse end date '{args.end}': {e}")
+
+    if ((not args.no_plot) and args.no_kalman_plot):
+        try:
+            render_plot(entries, ema_dense_dates, ema_dense_values, slope_per_day, intercept, args.output, no_display=args.no_display, start_date=start_date, end_date=end_date)
             print(f"Plot saved to: {args.output}")
         except Exception as e:
             print(f"Failed to render plot: {e}")
@@ -413,13 +464,19 @@ def main() -> None:
     # Generate Kalman filter plot if requested
     if not args.no_kalman_plot:
         try:
-            # Run Kalman filter
-            kalman_states, kalman_dates = run_kalman_filter(entries)
+            # Run Kalman algorithm per mode
+            if args.kalman_mode == "smoother":
+                from kalman import run_kalman_smoother
+                kalman_states, kalman_dates = run_kalman_smoother(entries)
+                plot_label = "Kalman RTS Smoother"
+            else:
+                kalman_states, kalman_dates = run_kalman_filter(entries)
+                plot_label = "Kalman Filter Estimate"
             
             if kalman_states:
                 # Create Kalman filter plot
-                create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display)
-                print("Kalman filter plot saved to: weight_trend.png")
+                create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date)
+                print("Kalman plot saved to: weight_trend.png")
                 
                 # Create body fat plot using Kalman smoothing
                 from kalman import create_bodyfat_plot_from_kalman
@@ -432,6 +489,8 @@ def main() -> None:
                         baseline_lean_lb=args.bf_baseline_lean,
                         output_path="bodyfat_trend.png",
                         no_display=args.no_display,
+                        start_date=start_date,
+                        end_date=end_date,
                     )
                     print("Body fat plot saved to: bodyfat_trend.png")
                 except Exception as e:
