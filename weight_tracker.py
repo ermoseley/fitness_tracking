@@ -381,6 +381,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bf-baseline-weight", type=float, default=None,
                         help="Baseline total weight in lb (default: first Kalman mean)")
     parser.add_argument("--no-display", action="store_true", help="Do not display plots in a GUI")
+    parser.add_argument("--lbm-csv", type=str, default="lbm.csv",
+                        help="Optional CSV with 'date,lbm' to drive body fat plot via interpolated LBM. Dates like YYYY-MM-DD.")
     parser.add_argument("--start", type=str, help="Start date for plotting (YYYY-MM-DD format). If not specified, shows all data from beginning.")
     parser.add_argument("--end", type=str, help="End date for plotting (YYYY-MM-DD format). If not specified, shows all data to end.")
     return parser.parse_args()
@@ -491,6 +493,7 @@ def main() -> None:
                         no_display=args.no_display,
                         start_date=start_date,
                         end_date=end_date,
+                        lbm_csv=args.lbm_csv,
                     )
                     print("Body fat plot saved to: bodyfat_trend.png")
                 except Exception as e:
@@ -505,9 +508,20 @@ def main() -> None:
                 
                 # Calculate forecasts
                 from kalman import WeightKalmanFilter
-                kf = WeightKalmanFilter(initial_weight=kalman_states[0].weight)
-                kf.state = latest_kalman
-                
+                # Initialize KF to the latest state exactly as in the plot code
+                kf = WeightKalmanFilter(
+                    initial_weight=latest_kalman.weight,
+                    initial_velocity=latest_kalman.velocity,
+                    initial_weight_var=latest_kalman.weight_var,
+                    initial_velocity_var=latest_kalman.velocity_var,
+                )
+                # Set full state and covariance including off-diagonal
+                kf.x = np.array([latest_kalman.weight, latest_kalman.velocity], dtype=float)
+                kf.P = np.array([
+                    [latest_kalman.weight_var, latest_kalman.weight_velocity_cov],
+                    [latest_kalman.weight_velocity_cov, latest_kalman.velocity_var],
+                ], dtype=float)
+
                 week_forecast, week_std = kf.forecast(7.0)
                 month_forecast, month_std = kf.forecast(30.0)
                 
