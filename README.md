@@ -168,3 +168,7 @@ The codebase is designed for extensibility:
 ## License
 
 This project is provided as-is for personal use and educational purposes.
+
+### Housekeeping
+- Use `./clean.sh` to remove build artifacts (`dist/`, `build/`, DMG, caches). Add `--all` to also remove local venvs.
+- Build outputs are ignored via `.gitignore` and should not be committed.

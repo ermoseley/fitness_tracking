@@ -92,3 +92,30 @@ After installation:
 **Need Help?** The app includes comprehensive error handling and will guide you through any issues.
 
 **Enjoy your fitness journey with Weight Tracker!** 🏃‍♂️💪
+
+
+## Cleaning build artifacts
+
+To remove build outputs and caches (similar to `make clean`):
+
+```bash
+./clean.sh
+```
+
+To also remove local virtual environments:
+
+```bash
+./clean.sh --all
+```
+
+## Git hygiene
+
+Ensure build artifacts aren’t committed:
+- Keep `dist/`, `build/`, `*.spec`, `installer_temp/`, and `WeightTracker-Installer.dmg` out of git (already covered by `.gitignore`).
+- If any of these were previously committed, run:
+
+```bash
+git rm -r --cached dist build installer_temp WeightTracker-Installer.dmg *.spec
+```
+
+Then commit the removal and push.
