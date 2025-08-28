@@ -33,8 +33,58 @@ class WeightTrackerGUI:
         self.root.minsize(640, 420)
 
         self.project_dir = os.path.dirname(os.path.abspath(__file__))
-        default_csv = os.path.join(self.project_dir, "weights.csv")
-        default_lbm = os.path.join(self.project_dir, "lbm.csv")
+
+        # For bundled apps, we need to find the correct data directory
+        # Check if we're running from a bundled app
+        if getattr(sys, 'frozen', False):
+            print("DEBUG: Running in bundled mode")
+            # Running in a bundle - use the fitness_tracking directory for data files
+            # This keeps all data in one place with the app
+            bundle_dir = os.path.dirname(sys.executable)
+            # Go up to the fitness_tracking directory (Contents/MacOS -> Contents -> fitness_tracking)
+            data_dir = os.path.join(bundle_dir, "..", "..")
+            print(f"DEBUG: Data directory will be: {data_dir}")
+
+            # Ensure the directory exists
+            os.makedirs(data_dir, exist_ok=True)
+            print(f"DEBUG: Created data directory: {data_dir}")
+
+            # Check if CSV files exist in bundle directory, if not copy from Resources
+            # For bundled apps, the CSV files are in the Resources directory
+            bundle_dir = os.path.dirname(sys.executable)
+            bundle_resources = os.path.join(bundle_dir, "..", "Resources")
+            bundle_csv = os.path.join(bundle_resources, "weights.csv")
+            bundle_lbm = os.path.join(bundle_resources, "lbm.csv")
+            print(f"DEBUG: Bundle CSV path: {bundle_csv}")
+            print(f"DEBUG: Bundle LBM path: {bundle_lbm}")
+
+            bundle_csv_dest = os.path.join(data_dir, "weights.csv")
+            bundle_lbm_dest = os.path.join(data_dir, "lbm.csv")
+
+            # Copy initial data files if they don't exist
+            if not os.path.exists(bundle_csv_dest) and os.path.exists(bundle_csv):
+                import shutil
+                shutil.copy2(bundle_csv, bundle_csv_dest)
+                print(f"DEBUG: Copied initial weights.csv to {bundle_csv_dest}")
+            else:
+                print(f"DEBUG: Bundle CSV already exists or source not found: {bundle_csv_dest}")
+
+            if not os.path.exists(bundle_lbm_dest) and os.path.exists(bundle_lbm):
+                import shutil
+                shutil.copy2(bundle_lbm, bundle_lbm_dest)
+                print(f"DEBUG: Copied initial lbm.csv to {bundle_lbm_dest}")
+            else:
+                print(f"DEBUG: Bundle LBM already exists or source not found: {bundle_lbm_dest}")
+        else:
+            print("DEBUG: Running in development mode")
+            # Running from source
+            data_dir = self.project_dir
+
+        default_csv = os.path.join(data_dir, "weights.csv")
+        default_lbm = os.path.join(data_dir, "lbm.csv")
+
+        # Store data directory for use in other methods
+        self.data_dir = data_dir
 
         # Variables
         self.var_csv = tk.StringVar(value=default_csv)
@@ -79,7 +129,7 @@ class WeightTrackerGUI:
         tk.OptionMenu(root, self.var_kalman_mode, "smoother", "filter").grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
-        tk.Checkbutton(root, text="Generate Weight Trend (EMA + regression)", variable=self.var_show_weight).grid(row=row, column=1, sticky="w", **pad)
+        tk.Checkbutton(root, text="Generate Weight Plot", variable=self.var_show_weight).grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
         tk.Checkbutton(root, text="Generate Kalman + Body Fat plots", variable=self.var_show_kalman).grid(row=row, column=1, sticky="w", **pad)
@@ -89,10 +139,10 @@ class WeightTrackerGUI:
 
         row += 1
         tk.Button(root, text="Run", command=self._on_run, width=16).grid(row=row, column=1, sticky="w", **pad)
-        tk.Button(root, text="Open weight plot", command=lambda: self._open_file(os.path.join(self.project_dir, "weight_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
+        tk.Button(root, text="Open weight plot", command=self._open_weight_plot).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
-        tk.Button(root, text="Open body fat plot", command=lambda: self._open_file(os.path.join(self.project_dir, "bodyfat_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
+        tk.Button(root, text="Open body fat plot", command=self._open_bodyfat_plot).grid(row=row, column=2, sticky="w", **pad)
 
         # Add entries section
         row += 1
@@ -150,32 +200,167 @@ class WeightTrackerGUI:
         except Exception as e:
             messagebox.showerror("Open failed", str(e))
 
+    def _get_plot_path(self, filename: str) -> str:
+        """Get the correct path for plot files based on whether we're running bundled or not"""
+        if getattr(sys, 'frozen', False):
+            # Running in bundle - plots are in the fitness_tracking directory
+            return os.path.join(self.data_dir, filename)
+        else:
+            # Running from source - plots are in project directory
+            return os.path.join(self.project_dir, filename)
+
+    def _open_weight_plot(self) -> None:
+        """Open the weight trend plot"""
+        path = self._get_plot_path("weight_trend.png")
+        self._open_file(path)
+
+    def _open_bodyfat_plot(self) -> None:
+        """Open the body fat trend plot"""
+        path = self._get_plot_path("bodyfat_trend.png")
+        self._open_file(path)
+
     def _build_args(self) -> list[str]:
-        args: list[str] = [sys.executable or "python3", os.path.join(self.project_dir, "weight_tracker.py")]
-        # CSVs
-        if self.var_csv.get().strip():
-            args += ["--csv", self.var_csv.get().strip()]
-        if self.var_lbm.get().strip():
-            args += ["--lbm-csv", self.var_lbm.get().strip()]
-        # Dates
-        if self.var_start.get().strip():
-            args += ["--start", self.var_start.get().strip()]
-        if self.var_end.get().strip():
-            args += ["--end", self.var_end.get().strip()]
-        # Mode and toggles
-        args += ["--kalman-mode", self.var_kalman_mode.get().strip()]
-        if not self.var_show_weight.get():
-            args += ["--no-plot"]
-        if not self.var_show_kalman.get():
-            args += ["--no-kalman-plot"]
-        if self.var_no_display.get():
-            args += ["--no-display"]
-        return args
+        # For bundled apps, we can import and run weight_tracker directly
+        # This avoids subprocess issues with bundled executables
+        if getattr(sys, 'frozen', False):
+            # Running in a bundle - we'll import and run the module directly
+            return []
+        else:
+            # Running from source - use system Python
+            python_exe = sys.executable or "python3"
+            script_path = os.path.join(self.project_dir, "weight_tracker.py")
+            args = [python_exe, script_path]
+            # CSVs
+            if self.var_csv.get().strip():
+                args += ["--csv", self.var_csv.get().strip()]
+            if self.var_lbm.get().strip():
+                args += ["--lbm-csv", self.var_lbm.get().strip()]
+            # Dates
+            if self.var_start.get().strip():
+                args += ["--start", self.var_start.get().strip()]
+            if self.var_end.get().strip():
+                args += ["--end", self.var_end.get().strip()]
+            # Mode and toggles
+            args += ["--kalman-mode", self.var_kalman_mode.get().strip()]
+            if not self.var_show_weight.get():
+                args += ["--no-plot"]
+            if not self.var_show_kalman.get():
+                args += ["--no-kalman-plot"]
+            if self.var_no_display.get():
+                args += ["--no-display"]
+            return args
 
     def _on_run(self) -> None:
-        args = self._build_args()
-        self._append_output("Running: " + " ".join(args))
+        if getattr(sys, 'frozen', False):
+            # Running in a bundle - import and run weight_tracker directly
+            self._append_output("Running weight tracker (bundled mode)...")
+            self._run_bundled_weight_tracker()
+        else:
+            # Running from source - use subprocess
+            args = self._build_args()
+            self._append_output("Running: " + " ".join(args))
+            self._run_subprocess_weight_tracker(args)
 
+    def _run_bundled_weight_tracker(self) -> None:
+        """Run weight_tracker directly when in bundled mode"""
+        def worker() -> None:
+            try:
+                # Import the weight_tracker module
+                import weight_tracker
+
+                # Create a mock argv for the module
+                original_argv = sys.argv[:]
+                sys.argv = ['weight_tracker.py']
+
+                # Add arguments based on GUI settings
+                if self.var_csv.get().strip():
+                    sys.argv += ["--csv", self.var_csv.get().strip()]
+                if self.var_lbm.get().strip():
+                    sys.argv += ["--lbm-csv", self.var_lbm.get().strip()]
+                if self.var_start.get().strip():
+                    sys.argv += ["--start", self.var_start.get().strip()]
+                if self.var_end.get().strip():
+                    sys.argv += ["--end", self.var_end.get().strip()]
+                sys.argv += ["--kalman-mode", self.var_kalman_mode.get().strip()]
+
+                # Set output directory for plots to the fitness_tracking directory
+                if getattr(sys, 'frozen', False):
+                    output_dir = self.data_dir
+                    os.makedirs(output_dir, exist_ok=True)
+                    sys.argv += ["--output", os.path.join(output_dir, "weight_trend.png")]
+
+                if not self.var_show_weight.get():
+                    sys.argv += ["--no-plot"]
+                if not self.var_show_kalman.get():
+                    sys.argv += ["--no-kalman-plot"]
+                
+                # Allow user to choose display mode
+                if self.var_no_display.get():
+                    sys.argv += ["--no-display"]
+                    print("DEBUG: Running in headless mode (user choice)")
+                else:
+                    print("DEBUG: Running with interactive plots enabled")
+
+                # Set matplotlib backend
+                import matplotlib
+                if self.var_no_display.get():
+                    # Headless mode - use Agg backend
+                    matplotlib.use("Agg")
+                    print("DEBUG: Using Agg backend (headless mode)")
+                else:
+                    # Interactive mode - try to use TkAgg for better integration
+                    try:
+                        # For bundled apps, we need to ensure matplotlib can find the Tkinter backend
+                        if getattr(sys, 'frozen', False):
+                            # Set environment variable to help matplotlib find Tkinter
+                            os.environ['TK_SILENCE_DEPRECATION'] = '1'
+                            
+                        matplotlib.use("TkAgg")
+                        print("DEBUG: Set TkAgg backend for interactive plotting")
+                    except Exception as e:
+                        print(f"DEBUG: TkAgg backend failed ({e}), falling back to Agg")
+                        matplotlib.use("Agg")
+
+                # Change working directory to the fitness_tracking directory for bundled mode
+                original_cwd = os.getcwd()
+                if getattr(sys, 'frozen', False):
+                    os.chdir(self.data_dir)
+
+                # Capture stdout to display in GUI
+                import io
+                from contextlib import redirect_stdout
+
+                f = io.StringIO()
+                with redirect_stdout(f):
+                    try:
+                        weight_tracker.main()
+                        output = f.getvalue()
+                        self._append_output(output)
+                        self._append_output("Done. You can click the buttons to open the generated plots.")
+                    except SystemExit as e:
+                        if e.code == 0:
+                            self._append_output("Done. You can click the buttons to open the generated plots.")
+                        else:
+                            self._append_output(f"Weight tracker exited with code {e.code}")
+                    except Exception as e:
+                        self._append_output(f"Error running weight tracker: {e}")
+                        import traceback
+                        self._append_output(f"Traceback: {traceback.format_exc()}")
+
+                # Restore original argv and cwd after weight_tracker execution
+                sys.argv = original_argv
+                if getattr(sys, 'frozen', False):
+                    os.chdir(original_cwd)
+
+            except Exception as e:
+                self._append_output(f"Error: {e}")
+                import traceback
+                self._append_output(f"Traceback: {traceback.format_exc()}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _run_subprocess_weight_tracker(self, args: list[str]) -> None:
+        """Run weight_tracker using subprocess (for development mode)"""
         def worker() -> None:
             try:
                 env = os.environ.copy()
@@ -183,8 +368,8 @@ class WeightTrackerGUI:
                 if self.var_no_display.get():
                     env["MPLBACKEND"] = "Agg"
                 else:
-                    # Prefer native macOS backend if available; fallback handled by matplotlib
                     env["MPLBACKEND"] = "MacOSX"
+
                 proc = subprocess.Popen(args, cwd=self.project_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 assert proc.stdout is not None
                 for line in proc.stdout:

@@ -55,7 +55,7 @@ def main():
         
         # Create and run the GUI
         app = WeightTrackerGUI(root)
-        
+
         # Start the main event loop
         root.mainloop()
         

@@ -605,21 +605,23 @@ def create_kalman_plot(entries,
     confidence_level = 1.96  # 95% confidence
     upper_band = [m + confidence_level * s for m, s in zip(dense_means, dense_stds)]
     lower_band = [m - confidence_level * s for m, s in zip(dense_means, dense_stds)]
-    
-    # Fill confidence bands with anti-aliasing for smooth curves
-    plt.fill_between(dense_datetimes, lower_band, upper_band, 
-                     alpha=0.3, color='gray', label='95% Confidence Interval',
-                     antialiased=True, linewidth=0,zorder=6)
-    
-    # Plot filtered/smoothed state mean with anti-aliasing for smooth curves
-    plt.plot(dense_datetimes, dense_means, '-', color='#ff7f0e', 
-             linewidth=2, label=label, 
-             antialiased=True, solid_capstyle='round',zorder=7)
-    
+
     # Plot raw data
     raw_weights = [e.weight for e in filtered_entries]
     plt.scatter(entry_datetimes, raw_weights, s=50, color='blue', 
                 alpha=0.7, label='Raw Measurements', zorder=5)
+    
+    # Fill confidence bands with anti-aliasing for smooth curves
+    plt.fill_between(dense_datetimes, lower_band, upper_band, 
+                     alpha=0.3, color='gray', label='95% Confidence Interval',
+                     antialiased=True, linewidth=0,zorder=7)
+    
+    # Plot filtered/smoothed state mean with anti-aliasing for smooth curves
+    plt.plot(dense_datetimes, dense_means, '-', color='#ff7f0e', 
+             linewidth=2, label=label, 
+             antialiased=True, solid_capstyle='round',zorder=8)
+    
+
     
     # Add stats box
     latest_state = states[-1]
@@ -662,7 +664,7 @@ Forecasts:
             bbox=dict(boxstyle='round', facecolor='white', 
                      alpha=0.9, edgecolor='#cccccc'), zorder=10)
     
-    plt.title('Weight Trend - Kalman Filter')
+    plt.title('Weight Trend')
     plt.xlabel('Date')
     plt.ylabel('Weight (lbs)')
     plt.grid(True, alpha=0.3)

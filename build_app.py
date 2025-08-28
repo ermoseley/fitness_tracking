@@ -144,6 +144,8 @@ app = BUNDLE(
         'NSHighResolutionCapable': True,
         'LSApplicationCategoryType': 'public.app-category.healthcare-fitness',
         'NSPrincipalClass': 'NSApplication',
+        'CFBundleIdentifier': 'com.weighttracker.app',
+        'LSMultipleInstancesProhibited': True,
     },
 )
 '''
@@ -180,9 +182,37 @@ def create_installer():
     # Create Applications folder link
     os.symlink("/Applications", f"{installer_dir}/Applications")
     
-    # Create DMG
+    # Create DMG with better layout and instructions
     dmg_name = "WeightTracker-Installer.dmg"
-    run_command(f"create-dmg --volname 'Weight Tracker Installer' --window-pos 200 120 --window-size 600 400 --icon-size 100 --icon 'WeightTracker.app' 175 120 --hide-extension 'WeightTracker.app' --app-drop-link 425 120 '{dmg_name}' '{installer_dir}'", "Creating DMG installer")
+    
+    # Create DMG with proper layout:
+    # - App icon on the left
+    # - Applications folder link on the right
+    # - Background image with instructions
+    # - Proper window sizing and positioning
+    dmg_command = f"""create-dmg \\
+        --volname "Weight Tracker Installer" \\
+        --volicon "assets/icon_128.png" \\
+        --window-pos 200 120 \\
+        --window-size 800 500 \\
+        --icon-size 100 \\
+        --icon "WeightTracker.app" 200 150 \\
+        --hide-extension "WeightTracker.app" \\
+        --app-drop-link 500 150 \\
+        --background "assets/installer_background.png" \\
+        --eula "INSTALL.md" \\
+        "{dmg_name}" \\
+        "{installer_dir}"
+    """
+    
+    # Try to create the DMG with the enhanced command
+    try:
+        run_command(dmg_command, "Creating enhanced DMG installer")
+    except:
+        # Fallback to basic DMG if enhanced version fails
+        print("  ⚠️  Enhanced DMG creation failed, using basic version...")
+        basic_command = f"create-dmg --volname 'Weight Tracker Installer' --window-pos 200 120 --window-size 600 400 --icon-size 100 --icon 'WeightTracker.app' 175 120 --hide-extension 'WeightTracker.app' --app-drop-link 425 120 '{dmg_name}' '{installer_dir}'"
+        run_command(basic_command, "Creating basic DMG installer")
     
     # Clean up
     shutil.rmtree(installer_dir)
