@@ -151,31 +151,111 @@ class WeightTrackerGUI:
             messagebox.showerror("Open failed", str(e))
 
     def _build_args(self) -> list[str]:
-        args: list[str] = [sys.executable or "python3", os.path.join(self.project_dir, "weight_tracker.py")]
-        # CSVs
-        if self.var_csv.get().strip():
-            args += ["--csv", self.var_csv.get().strip()]
-        if self.var_lbm.get().strip():
-            args += ["--lbm-csv", self.var_lbm.get().strip()]
-        # Dates
-        if self.var_start.get().strip():
-            args += ["--start", self.var_start.get().strip()]
-        if self.var_end.get().strip():
-            args += ["--end", self.var_end.get().strip()]
-        # Mode and toggles
-        args += ["--kalman-mode", self.var_kalman_mode.get().strip()]
-        if not self.var_show_weight.get():
-            args += ["--no-plot"]
-        if not self.var_show_kalman.get():
-            args += ["--no-kalman-plot"]
-        if self.var_no_display.get():
-            args += ["--no-display"]
-        return args
+        # Check if we're running in a bundled app
+        if getattr(sys, 'frozen', False):
+            # Running in a bundle - we need to import and run weight_tracker directly
+            return []
+        else:
+            # Running from source - use system Python
+            args: list[str] = ["python3", os.path.join(self.project_dir, "weight_tracker.py")]
+            # CSVs
+            if self.var_csv.get().strip():
+                args += ["--csv", self.var_csv.get().strip()]
+            if self.var_lbm.get().strip():
+                args += ["--lbm-csv", self.var_lbm.get().strip()]
+            # Dates
+            if self.var_start.get().strip():
+                args += ["--start", self.var_start.get().strip()]
+            if self.var_end.get().strip():
+                args += ["--end", self.var_end.get().strip()]
+            # Mode and toggles
+            args += ["--kalman-mode", self.var_kalman_mode.get().strip()]
+            if not self.var_show_weight.get():
+                args += ["--no-plot"]
+            if not self.var_show_kalman.get():
+                args += ["--no-kalman-plot"]
+            if self.var_no_display.get():
+                args += ["--no-display"]
+            return args
 
     def _on_run(self) -> None:
         args = self._build_args()
-        self._append_output("Running: " + " ".join(args))
+        
+        if getattr(sys, 'frozen', False):
+            # Running in a bundle - import and run weight_tracker directly
+            self._append_output("Running weight tracker (bundled mode)...")
+            self._run_bundled_weight_tracker()
+        else:
+            # Running from source - use subprocess
+            self._append_output("Running: " + " ".join(args))
+            self._run_subprocess_weight_tracker(args)
 
+    def _run_bundled_weight_tracker(self) -> None:
+        """Run weight_tracker directly when in bundled mode"""
+        try:
+            # Import the weight_tracker module
+            import weight_tracker
+            
+            # Create a mock argv for the module
+            original_argv = sys.argv[:]
+            sys.argv = ['weight_tracker.py']
+            
+            # Add arguments based on GUI settings
+            if self.var_csv.get().strip():
+                sys.argv += ["--csv", self.var_csv.get().strip()]
+            if self.var_lbm.get().strip():
+                sys.argv += ["--lbm-csv", self.var_lbm.get().strip()]
+            if self.var_start.get().strip():
+                sys.argv += ["--start", self.var_start.get().strip()]
+            if self.var_end.get().strip():
+                sys.argv += ["--end", self.var_end.get().strip()]
+            sys.argv += ["--kalman-mode", self.var_kalman_mode.get().strip()]
+            
+            if not self.var_show_weight.get():
+                sys.argv += ["--no-plot"]
+            if not self.var_show_kalman.get():
+                sys.argv += ["--no-kalman-plot"]
+            if self.var_no_display.get():
+                sys.argv += ["--no-display"]
+            
+            # Set matplotlib backend
+            import matplotlib
+            if self.var_no_display.get():
+                matplotlib.use("Agg")
+            else:
+                matplotlib.use("TkAgg")
+            
+            # Capture stdout to display in GUI
+            import io
+            from contextlib import redirect_stdout
+            
+            f = io.StringIO()
+            with redirect_stdout(f):
+                try:
+                    weight_tracker.main()
+                    output = f.getvalue()
+                    self._append_output(output)
+                    self._append_output("Done. You can click the buttons to open the generated plots.")
+                except SystemExit as e:
+                    if e.code == 0:
+                        self._append_output("Done. You can click the buttons to open the generated plots.")
+                    else:
+                        self._append_output(f"Weight tracker exited with code {e.code}")
+                except Exception as e:
+                    self._append_output(f"Error running weight tracker: {e}")
+                    import traceback
+                    self._append_output(f"Traceback: {traceback.format_exc()}")
+            
+            # Restore original argv
+            sys.argv = original_argv
+            
+        except Exception as e:
+            self._append_output(f"Error: {e}")
+            import traceback
+            self._append_output(f"Traceback: {traceback.format_exc()}")
+
+    def _run_subprocess_weight_tracker(self, args: list[str]) -> None:
+        """Run weight_tracker using subprocess (for development mode)"""
         def worker() -> None:
             try:
                 env = os.environ.copy()
