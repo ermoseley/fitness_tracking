@@ -1,6 +1,6 @@
-# 🎯 Weight Tracker Installation Guide
+# Weight Tracker Installation Guide
 
-## 🚀 Quick Start Installation
+## Quick Start Installation
 
 ### Option 1: Professional DMG Installer (Recommended)
 1. **Download the Installer**
@@ -30,32 +30,32 @@
 3. **Launch**
    - Double-click `WeightTracker` from Applications
 
-## 📱 What You'll Get
+## What You'll Get
 
 - **Professional App**: Full-featured macOS application
 - **Data Management**: Automatic setup of `~/Documents/WeightTracker/` directory
 - **CSV Import**: Your existing weight and LBM data will be automatically copied
 - **No Dependencies**: Everything is bundled - no Python installation required
 
-## 🔧 First Launch Setup
+## First Launch Setup
 
 When you first launch WeightTracker:
 
 1. **Permission Requests**: macOS may ask for permissions to access files
 2. **Data Directory**: The app automatically creates `~/Documents/WeightTracker/`
 3. **Initial Data**: Your CSV files are copied to the user directory
-4. **Ready to Use**: Start tracking your fitness journey immediately!
+4. **Ready to Use**: Start tracking your fitness progress immediately
 
-## 📊 Features Available
+## Features Available
 
-- ✅ **Weight Tracking**: Monitor weight over time
-- ✅ **Body Composition**: Track lean body mass and body fat
-- ✅ **Advanced Analytics**: EMA smoothing, Kalman filtering
-- ✅ **Data Visualization**: Generate beautiful charts and plots
-- ✅ **Data Export**: Work with CSV files
-- ✅ **Trend Analysis**: Identify patterns and progress
+- **Weight Tracking**: Monitor weight over time
+- **Body Composition**: Track lean body mass and body fat
+- **Advanced Analytics**: EMA smoothing, Kalman filtering
+- **Data Visualization**: Generate charts and plots
+- **Data Export**: Work with CSV files
+- **Trend Analysis**: Identify patterns and progress
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 ### App Won't Launch
 - Check that the app is in your Applications folder
@@ -72,14 +72,14 @@ When you first launch WeightTracker:
 - Plots are saved to `~/Documents/WeightTracker/`
 - Use the "Open plot" buttons in the GUI to view results
 
-## 📁 File Locations
+## File Locations
 
 - **App Bundle**: `/Applications/WeightTracker.app`
 - **User Data**: `~/Documents/WeightTracker/`
 - **Generated Plots**: `~/Documents/WeightTracker/*.png`
 - **CSV Files**: `~/Documents/WeightTracker/*.csv`
 
-## 🎉 You're All Set!
+## Installation Complete
 
 After installation:
 1. Launch WeightTracker from Applications
@@ -91,7 +91,7 @@ After installation:
 
 **Need Help?** The app includes comprehensive error handling and will guide you through any issues.
 
-**Enjoy your fitness journey with Weight Tracker!** 🏃‍♂️💪
+**Support**: For technical issues, refer to the troubleshooting section above or consult the project documentation.
 
 
 ## Cleaning build artifacts

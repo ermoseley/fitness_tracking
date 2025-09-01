@@ -503,7 +503,13 @@ def main() -> None:
                 latest_kalman = kalman_states[-1]
                 print(f"\n=== Kalman Filter Summary ===")
                 print(f"Current weight estimate: {latest_kalman.weight:.2f} ± {1.96 * (latest_kalman.weight_var**0.5):.2f}")
-                print(f"Current rate: {7*latest_kalman.velocity:+.3f} lbs/week")
+                
+                # Calculate velocity uncertainty
+                velocity_std = (latest_kalman.velocity_var**0.5)
+                velocity_ci = 1.96 * velocity_std
+                velocity_per_week = 7 * latest_kalman.velocity
+                velocity_ci_per_week = 7 * velocity_ci
+                print(f"Current rate: {velocity_per_week:+.3f} ± {velocity_ci_per_week:.3f} lbs/week")
                 print(f"Calorie deficit: {latest_kalman.velocity*3500:+.3f} calories/day")
                 
                 # Calculate forecasts
