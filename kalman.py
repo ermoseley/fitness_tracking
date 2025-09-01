@@ -646,10 +646,16 @@ def create_kalman_plot(entries,
     week_forecast, week_std = kf.forecast(7.0)
     month_forecast, month_std = kf.forecast(30.0)
     
+    # Calculate velocity uncertainty (95% confidence interval)
+    velocity_std = np.sqrt(max(latest_state.velocity_var, 0.0))
+    velocity_ci = 1.96 * velocity_std
+    velocity_per_week = 7 * latest_state.velocity
+    velocity_ci_per_week = 7 * velocity_ci
+    
     # Create stats text (mean/std from spline; slope from latest Kalman state)
     stats_text = f"""Current Estimate ({latest_date})
 Weight: {current_mean:.2f} ± {1.96 * current_std:.2f}
-Rate: {(7*latest_state.velocity):+.3f} lbs/week
+Rate: {velocity_per_week:+.3f} ± {velocity_ci_per_week:.3f} lbs/week
 
 Forecasts:
 1 week: {week_forecast:.2f} ± {1.96 * week_std:.2f}
@@ -900,6 +906,32 @@ def create_bodyfat_plot_from_kalman(
         else:
             bf_slope_per_day = 0.0
     bf_slope_per_week = 7.0 * bf_slope_per_day
+    
+    # Calculate body fat rate uncertainty by propagating weight velocity uncertainty
+    # For the body fat model: BF% = 100 * (W - L) / W where L = L0 + s*(W - W0)
+    # The rate uncertainty comes from the weight velocity uncertainty
+    weight_velocity_std = np.sqrt(max(states[-1].velocity_var, 0.0))
+    weight_velocity_ci = 1.96 * weight_velocity_std
+    
+    # Approximate BF rate uncertainty using finite differences around current weight
+    current_weight = float(dense_means[-1])
+    weight_perturbation = weight_velocity_ci * 7.0  # 1 week worth of velocity uncertainty
+    
+    if lbm_csv:
+        # For LBM-based calculation, uncertainty comes from weight uncertainty
+        current_lbm = _evaluate_lbm_series([dense_datetimes[-1]], lbm_points)[0]
+        bf_current = float(max(0.0, min(100.0, 100.0 * (1.0 - (current_lbm / max(1e-6, current_weight))))))
+        bf_pert_lo = float(max(0.0, min(100.0, 100.0 * (1.0 - (current_lbm / max(1e-6, current_weight - weight_perturbation))))))
+        bf_pert_hi = float(max(0.0, min(100.0, 100.0 * (1.0 - (current_lbm / max(1e-6, current_weight + weight_perturbation))))))
+    else:
+        # For model-based calculation with s_mid = 0.10
+        s_mid = 0.10
+        bf_current = _compute_bodyfat_pct_from_weight([current_weight], [dense_datetimes[-1]], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
+        bf_pert_lo = _compute_bodyfat_pct_from_weight([current_weight - weight_perturbation], [dense_datetimes[-1]], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
+        bf_pert_hi = _compute_bodyfat_pct_from_weight([current_weight + weight_perturbation], [dense_datetimes[-1]], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
+    
+    # BF rate uncertainty (per week)
+    bf_rate_uncertainty = max(abs(bf_pert_hi - bf_current), abs(bf_current - bf_pert_lo))
 
     # Forecasts: transform Kalman weight forecasts through BF model
     from kalman import WeightKalmanFilter
@@ -945,7 +977,7 @@ def create_bodyfat_plot_from_kalman(
     stats_text = (
         f"Current Estimate ({latest_date})\n"
         f"Body Fat: {current_bf:.2f}% ± {current_halfwidth:.2f}%\n"
-        f"Rate: {bf_slope_per_week:+.3f}%/week\n\n"
+        f"Rate: {bf_slope_per_week:+.3f} ± {bf_rate_uncertainty:.3f}%/week\n\n"
         f"Forecasts:\n"
         f"1 week: {bf_week_mid:.2f}% ± {bf_week_halfwidth:.2f}%\n"
         f"1 month: {bf_month_mid:.2f}% ± {bf_month_halfwidth:.2f}%"
