@@ -60,6 +60,9 @@ class WeightTrackerGUI:
         self.var_kalman_mode = tk.StringVar(value="smoother")
         self.var_confidence_interval = tk.StringVar(value="95%")
         self.var_show_weight = tk.BooleanVar(value=True)
+        self.var_show_weight_plot = tk.BooleanVar(value=True)
+        self.var_show_bodyfat_plot = tk.BooleanVar(value=True)
+        self.var_show_residuals_plot = tk.BooleanVar(value=False)
         self.var_aggregation_hours = tk.StringVar(value="3")
         self.var_no_display = tk.BooleanVar(value=False)
 
@@ -108,6 +111,14 @@ class WeightTrackerGUI:
         tk.OptionMenu(root, self.var_aggregation_hours, "3", "6", "12", "24", "0 (off)").grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
+        tk.Label(root, text="Generate plots:").grid(row=row, column=0, sticky="e", **pad)
+        plot_frame = tk.Frame(root)
+        plot_frame.grid(row=row, column=1, sticky="w", **pad)
+        tk.Checkbutton(plot_frame, text="Weight trend", variable=self.var_show_weight_plot).grid(row=0, column=0, sticky="w", padx=(0, 20))
+        tk.Checkbutton(plot_frame, text="Body fat %", variable=self.var_show_bodyfat_plot).grid(row=0, column=1, sticky="w", padx=(0, 20))
+        tk.Checkbutton(plot_frame, text="Residuals histogram", variable=self.var_show_residuals_plot).grid(row=0, column=2, sticky="w")
+
+        row += 1
         tk.Checkbutton(root, text="Save plots as PNG files", variable=self.var_show_weight).grid(row=row, column=1, sticky="w", **pad)
         
         row += 1
@@ -121,7 +132,6 @@ class WeightTrackerGUI:
         tk.Button(root, text="Open body fat plot", command=lambda: self._open_file(os.path.join(self.project_dir, "bodyfat_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
-        tk.Button(root, text="Generate Residuals Histogram", command=self._on_residuals_histogram, width=20).grid(row=row, column=1, sticky="w", **pad)
         tk.Button(root, text="Open residuals plot", command=lambda: self._open_file(os.path.join(self.project_dir, "residuals_histogram.png"))).grid(row=row, column=2, sticky="w", **pad)
 
         # Add entries section
@@ -302,6 +312,13 @@ class WeightTrackerGUI:
                 args += ["--aggregation-hours", "0"]
             elif agg:
                 args += ["--aggregation-hours", agg]
+            # Plot controls
+            if not self.var_show_weight_plot.get():
+                args += ["--no-kalman-plot", "--no-plot"]  # Disable both weight trend plots
+            if not self.var_show_bodyfat_plot.get():
+                args += ["--no-bodyfat-plot"]
+            if self.var_show_residuals_plot.get():
+                args += ["--residuals-histogram"]
             if not self.var_show_weight.get():
                 args += ["--no-plot"]
             if self.var_no_display.get():
@@ -358,6 +375,13 @@ class WeightTrackerGUI:
             sys.argv += ["--kalman-mode", self.var_kalman_mode.get().strip()]
             sys.argv += ["--confidence-interval", self.var_confidence_interval.get().strip()]
             
+            # Plot controls
+            if not self.var_show_weight_plot.get():
+                sys.argv += ["--no-kalman-plot", "--no-plot"]  # Disable both weight trend plots
+            if not self.var_show_bodyfat_plot.get():
+                sys.argv += ["--no-bodyfat-plot"]
+            if self.var_show_residuals_plot.get():
+                sys.argv += ["--residuals-histogram"]
             if not self.var_show_weight.get():
                 sys.argv += ["--no-plot"]
             if self.var_no_display.get():
@@ -643,56 +667,6 @@ class WeightTrackerGUI:
         
         self._append_output(f"Height updated to {height_value} {unit} ({height_inches:.3f} inches)")
 
-    def _on_residuals_histogram(self) -> None:
-        """Generate residuals histogram and normality test"""
-        self._append_output("Generating residuals histogram...")
-        
-        def worker() -> None:
-            try:
-                # Build arguments for residuals analysis
-                args = [sys.executable or "python3", os.path.join(self.project_dir, "weight_tracker.py")]
-                
-                # Add CSV arguments
-                if self.var_csv.get().strip():
-                    args += ["--csv", self.var_csv.get().strip()]
-                if self.var_lbm.get().strip():
-                    args += ["--lbm-csv", self.var_lbm.get().strip()]
-                
-                # Add date range arguments
-                if self.var_start.get().strip():
-                    args += ["--start", self.var_start.get().strip()]
-                if self.var_end.get().strip():
-                    args += ["--end", self.var_end.get().strip()]
-                
-                # Add Kalman mode, confidence interval, aggregation, and residuals histogram flag
-                args += ["--kalman-mode", self.var_kalman_mode.get().strip()]
-                args += ["--confidence-interval", self.var_confidence_interval.get().strip()]
-                agg = self.var_aggregation_hours.get().strip()
-                if agg == "0 (off)":
-                    args += ["--aggregation-hours", "0"]
-                elif agg:
-                    args += ["--aggregation-hours", agg]
-                args += ["--residuals-histogram"]
-                args += ["--no-plot"]  # Don't generate the main weight plot
-                args += ["--no-display"]  # Don't display plots
-                
-                self._append_output("Running residuals analysis: " + " ".join(args))
-                
-                proc = subprocess.Popen(args, cwd=self.project_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                assert proc.stdout is not None
-                for line in proc.stdout:
-                    self._append_output(line.rstrip())
-                code = proc.wait()
-                
-                if code == 0:
-                    self._append_output("Residuals histogram generated successfully.")
-                else:
-                    self._append_output(f"Failed to generate residuals histogram (exit {code}).")
-                    
-            except Exception as e:
-                self._append_output("Error generating residuals histogram: " + str(e))
-        
-        threading.Thread(target=worker, daemon=True).start()
 
 
 def main() -> None:

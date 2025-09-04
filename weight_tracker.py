@@ -475,6 +475,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-plot", action="store_true", help="Do not generate plot image")
     parser.add_argument("--output", default="weight_trend.png", help="Output plot image path. Default: weight_trend.png")
     parser.add_argument("--no-kalman-plot", action="store_true", help="Do not generate Kalman filter plot")
+    parser.add_argument("--no-bodyfat-plot", action="store_true", help="Do not generate body fat plot")
     parser.add_argument("--kalman-mode", choices=["filter", "smoother"], default="smoother",
                         help="Use forward Kalman filter ('filter') or RTS smoother ('smoother') for historical trend")
     parser.add_argument("--print-table", action="store_true", help="Print table of date, weight, EMA")
@@ -609,29 +610,31 @@ def main() -> None:
                 plot_label = "Kalman Filter Estimate"
             
             if kalman_states:
-                # Create Kalman filter plot
-                create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier)
-                print("Kalman plot saved to: weight_trend.png")
+                # Create Kalman filter plot (if not disabled)
+                if not args.no_kalman_plot:
+                    create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier)
+                    print("Kalman plot saved to: weight_trend.png")
                 
-                # Create body fat plot using Kalman smoothing
-                from kalman import create_bodyfat_plot_from_kalman
-                try:
-                    create_bodyfat_plot_from_kalman(
-                        entries,
-                        kalman_states,
-                        kalman_dates,
-                        baseline_weight_lb=args.bf_baseline_weight,
-                        baseline_lean_lb=args.bf_baseline_lean,
-                        output_path="bodyfat_trend.png",
-                        no_display=args.no_display,
-                        start_date=start_date,
-                        end_date=end_date,
-                        lbm_csv=args.lbm_csv,
-                        ci_multiplier=ci_multiplier,
-                    )
-                    print("Body fat plot saved to: bodyfat_trend.png")
-                except Exception as e:
-                    print(f"Failed to generate body fat plot: {e}")
+                # Create body fat plot using Kalman smoothing (if not disabled)
+                if not args.no_bodyfat_plot:
+                    from kalman import create_bodyfat_plot_from_kalman
+                    try:
+                        create_bodyfat_plot_from_kalman(
+                            entries,
+                            kalman_states,
+                            kalman_dates,
+                            baseline_weight_lb=args.bf_baseline_weight,
+                            baseline_lean_lb=args.bf_baseline_lean,
+                            output_path="bodyfat_trend.png",
+                            no_display=args.no_display,
+                            start_date=start_date,
+                            end_date=end_date,
+                            lbm_csv=args.lbm_csv,
+                            ci_multiplier=ci_multiplier,
+                        )
+                        print("Body fat plot saved to: bodyfat_trend.png")
+                    except Exception as e:
+                        print(f"Failed to generate body fat plot: {e}")
                 
                 # Print Kalman filter summary
                 latest_kalman = kalman_states[-1]
