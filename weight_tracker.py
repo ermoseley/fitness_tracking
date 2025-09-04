@@ -29,6 +29,11 @@ class WeightEntry:
 # Utilities
 # ---------------------------
 
+DEFAULT_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_DATA_DIR = os.path.join(DEFAULT_BASE_DIR, "data")
+DEFAULT_WEIGHTS_CSV = os.path.join(DEFAULT_DATA_DIR, "weights.csv")
+DEFAULT_LBM_CSV = os.path.join(DEFAULT_DATA_DIR, "lbm.csv")
+
 DATETIME_FORMATS = [
     "%Y-%m-%d %H:%M:%S",     # 2025-08-19 14:30:00
     "%Y-%m-%d %H:%M",        # 2025-08-19 14:30
@@ -463,7 +468,7 @@ def compute_ema_and_spline(entries: List[WeightEntry], span_days: float) -> Tupl
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Track weights, compute EMA and time-weighted linear regression trend.")
-    parser.add_argument("--csv", default="weights.csv", help="Path to CSV file with columns: date, weight. Default: weights.csv")
+    parser.add_argument("--csv", default=DEFAULT_WEIGHTS_CSV, help="Path to CSV file with columns: date, weight. Default: data/weights.csv")
     parser.add_argument("--add", action="append", default=[], help="Add an entry in the form YYYY-MM-DD:WEIGHT (can be used multiple times)")
     parser.add_argument("--ema-days", type=float, default=7.0, help="EMA span in days. Default: 7")
     parser.add_argument("--half-life-days", type=float, default=7.0, help="Half-life for time weighting in regression. Default: 7")
@@ -479,8 +484,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bf-baseline-weight", type=float, default=None,
                         help="Baseline total weight in lb (default: first Kalman mean)")
     parser.add_argument("--no-display", action="store_true", help="Do not display plots in a GUI")
-    parser.add_argument("--lbm-csv", type=str, default="lbm.csv",
-                        help="Optional CSV with 'date,lbm' to drive body fat plot via interpolated LBM. Dates like YYYY-MM-DD.")
+    parser.add_argument("--lbm-csv", type=str, default=DEFAULT_LBM_CSV,
+                        help="Optional CSV with 'date,lbm' to drive body fat plot via interpolated LBM. Default: data/lbm.csv")
     parser.add_argument("--start", type=str, help="Start date for plotting (YYYY-MM-DD format). If not specified, shows all data from beginning.")
     parser.add_argument("--end", type=str, help="End date for plotting (YYYY-MM-DD format). If not specified, shows all data to end.")
     parser.add_argument("--residuals-histogram", action="store_true", help="Generate residuals histogram and normality test")
@@ -500,10 +505,11 @@ def get_confidence_multiplier(ci_choice: str) -> float:
 
 
 def parse_add_arg(s: str) -> WeightEntry:
-    try:
-        datetime_part, weight_part = s.split(":", 1)
-    except ValueError:
+    # Split on the last colon so HH:MM:SS works
+    pos = s.rfind(":")
+    if pos == -1:
         raise ValueError("--add must be in the form YYYY-MM-DD[THH:MM:SS]:WEIGHT")
+    datetime_part, weight_part = s[:pos], s[pos+1:]
     d = parse_datetime(datetime_part.strip())
     try:
         w = float(weight_part.strip())
@@ -517,10 +523,20 @@ def main() -> None:
 
     csv_path = args.csv
 
+    # Ensure data directory exists for default paths
+    try:
+        os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
+    except Exception:
+        pass
+
     # Handle additions first (persist them), then load full dataset
-    for add_str in args.add:
-        entry = parse_add_arg(add_str)
-        append_entry(csv_path, entry)
+    if args.add:
+        for add_str in args.add:
+            entry = parse_add_arg(add_str)
+            append_entry(csv_path, entry)
+        # If only adding and no plots requested, exit cleanly
+        if args.no_plot and args.no_kalman_plot:
+            return
 
     entries = load_entries(csv_path)
     # Apply aggregation window prior to all downstream computations

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -27,14 +28,15 @@ class WeightTrackerGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Weight Tracker")
-        self.root.geometry("640x420")
+        self.root.geometry("1080x720")
         # Allow both horizontal and vertical resizing
         self.root.resizable(True, True)
         self.root.minsize(640, 420)
 
         self.project_dir = os.path.dirname(os.path.abspath(__file__))
-        default_csv = os.path.join(self.project_dir, "weights.csv")
-        default_lbm = os.path.join(self.project_dir, "lbm.csv")
+        self.data_dir = os.path.join(self.project_dir, "data")
+        default_csv = ""
+        default_lbm = ""
 
         # Variables
         self.var_csv = tk.StringVar(value=default_csv)
@@ -58,12 +60,12 @@ class WeightTrackerGUI:
         pad = {"padx": 8, "pady": 6}
 
         row = 0
-        tk.Label(root, text="Weights CSV:").grid(row=row, column=0, sticky="e", **pad)
+        tk.Label(root, text="Upload weights CSV:").grid(row=row, column=0, sticky="e", **pad)
         tk.Entry(root, textvariable=self.var_csv, width=52).grid(row=row, column=1, sticky="we", **pad)
         tk.Button(root, text="Browse", command=self._browse_csv).grid(row=row, column=2, **pad)
 
         row += 1
-        tk.Label(root, text="LBM CSV (optional):").grid(row=row, column=0, sticky="e", **pad)
+        tk.Label(root, text="Upload LBM CSV (optional):").grid(row=row, column=0, sticky="e", **pad)
         tk.Entry(root, textvariable=self.var_lbm, width=52).grid(row=row, column=1, sticky="we", **pad)
         tk.Button(root, text="Browse", command=self._browse_lbm).grid(row=row, column=2, **pad)
 
@@ -108,22 +110,32 @@ class WeightTrackerGUI:
         row += 1
         tk.Label(root, text="Add Weight Entry:").grid(row=row, column=0, sticky="e", **pad)
         weight_frame = tk.Frame(root)
-        weight_frame.grid(row=row, column=1, columnspan=2, sticky="w", **pad)
+        weight_frame.grid(row=row, column=1, sticky="we", **pad)
+        # Configure weight_frame columns for consistent alignment
+        weight_frame.grid_columnconfigure(0, weight=0)  # DateTime label
+        weight_frame.grid_columnconfigure(1, weight=0)  # DateTime entry
+        weight_frame.grid_columnconfigure(2, weight=0)  # Weight label
+        weight_frame.grid_columnconfigure(3, weight=0)  # Weight entry
         tk.Label(weight_frame, text="DateTime (YYYY-MM-DD[THH:MM:SS]):").grid(row=0, column=0, sticky="e", padx=(0, 6))
         tk.Entry(weight_frame, textvariable=self.var_add_weight_date, width=12).grid(row=0, column=1, sticky="w", padx=(0, 12))
-        tk.Label(weight_frame, text="Weight (lb):").grid(row=0, column=2, sticky="e", padx=(0, 6))
+        tk.Label(weight_frame, text="Weight (lb):", width=12, anchor="e").grid(row=0, column=2, sticky="e", padx=(0, 6))
         tk.Entry(weight_frame, textvariable=self.var_add_weight_value, width=10).grid(row=0, column=3, sticky="w", padx=(0, 12))
-        tk.Button(weight_frame, text="Add to weights.csv", command=self._on_add_weight).grid(row=0, column=4, sticky="w")
+        tk.Button(root, text="Add to weights.csv", command=self._on_add_weight).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
         tk.Label(root, text="Add LBM Entry:").grid(row=row, column=0, sticky="e", **pad)
         lbm_frame = tk.Frame(root)
-        lbm_frame.grid(row=row, column=1, columnspan=2, sticky="w", **pad)
+        lbm_frame.grid(row=row, column=1, sticky="we", **pad)
+        # Configure lbm_frame columns to match weight_frame
+        lbm_frame.grid_columnconfigure(0, weight=0)  # DateTime label
+        lbm_frame.grid_columnconfigure(1, weight=0)  # DateTime entry
+        lbm_frame.grid_columnconfigure(2, weight=0)  # LBM label
+        lbm_frame.grid_columnconfigure(3, weight=0)  # LBM entry
         tk.Label(lbm_frame, text="DateTime (YYYY-MM-DD[THH:MM:SS]):").grid(row=0, column=0, sticky="e", padx=(0, 6))
         tk.Entry(lbm_frame, textvariable=self.var_add_lbm_date, width=12).grid(row=0, column=1, sticky="w", padx=(0, 12))
-        tk.Label(lbm_frame, text="LBM (lb):").grid(row=0, column=2, sticky="e", padx=(0, 6))
+        tk.Label(lbm_frame, text="LBM (lb):", width=12, anchor="e").grid(row=0, column=2, sticky="e", padx=(0, 6))
         tk.Entry(lbm_frame, textvariable=self.var_add_lbm_value, width=10).grid(row=0, column=3, sticky="w", padx=(0, 12))
-        tk.Button(lbm_frame, text="Add to LBM CSV", command=self._on_add_lbm).grid(row=0, column=4, sticky="w")
+        tk.Button(root, text="Add to LBM CSV", command=self._on_add_lbm).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
         self.output = scrolledtext.ScrolledText(root, height=14, width=80, wrap="word")
@@ -168,11 +180,28 @@ class WeightTrackerGUI:
         else:
             # Running from source - use system Python
             args: list[str] = ["python3", os.path.join(self.project_dir, "weight_tracker.py")]
-            # CSVs
-            if self.var_csv.get().strip():
-                args += ["--csv", self.var_csv.get().strip()]
-            if self.var_lbm.get().strip():
-                args += ["--lbm-csv", self.var_lbm.get().strip()]
+            # Ensure data dir exists
+            os.makedirs(self.data_dir, exist_ok=True)
+            # CSVs (upload semantics)
+            weights_target = os.path.join(self.data_dir, "weights.csv")
+            lbm_target = os.path.join(self.data_dir, "lbm.csv")
+            src_weights = self.var_csv.get().strip()
+            src_lbm = self.var_lbm.get().strip()
+            if src_weights:
+                try:
+                    if os.path.abspath(src_weights) != os.path.abspath(weights_target):
+                        shutil.copy2(src_weights, weights_target)
+                except Exception as e:
+                    messagebox.showerror("Upload failed", f"Failed to upload weights CSV: {e}")
+                args += ["--csv", weights_target]
+            # If not provided, rely on default in weight_tracker (data/weights.csv)
+            if src_lbm:
+                try:
+                    if os.path.abspath(src_lbm) != os.path.abspath(lbm_target):
+                        shutil.copy2(src_lbm, lbm_target)
+                except Exception as e:
+                    messagebox.showerror("Upload failed", f"Failed to upload LBM CSV: {e}")
+                args += ["--lbm-csv", lbm_target]
             # Dates
             if self.var_start.get().strip():
                 args += ["--start", self.var_start.get().strip()]
@@ -215,11 +244,27 @@ class WeightTrackerGUI:
             original_argv = sys.argv[:]
             sys.argv = ['weight_tracker.py']
             
-            # Add arguments based on GUI settings
+            # Ensure data dir exists
+            os.makedirs(self.data_dir, exist_ok=True)
+            weights_target = os.path.join(self.data_dir, "weights.csv")
+            lbm_target = os.path.join(self.data_dir, "lbm.csv")
+            # Add arguments based on GUI settings (upload semantics)
             if self.var_csv.get().strip():
-                sys.argv += ["--csv", self.var_csv.get().strip()]
+                src_weights = self.var_csv.get().strip()
+                try:
+                    if os.path.abspath(src_weights) != os.path.abspath(weights_target):
+                        shutil.copy2(src_weights, weights_target)
+                except Exception as e:
+                    self._append_output(f"Upload weights CSV failed: {e}")
+                sys.argv += ["--csv", weights_target]
             if self.var_lbm.get().strip():
-                sys.argv += ["--lbm-csv", self.var_lbm.get().strip()]
+                src_lbm = self.var_lbm.get().strip()
+                try:
+                    if os.path.abspath(src_lbm) != os.path.abspath(lbm_target):
+                        shutil.copy2(src_lbm, lbm_target)
+                except Exception as e:
+                    self._append_output(f"Upload LBM CSV failed: {e}")
+                sys.argv += ["--lbm-csv", lbm_target]
             if self.var_start.get().strip():
                 sys.argv += ["--start", self.var_start.get().strip()]
             if self.var_end.get().strip():
@@ -312,8 +357,12 @@ class WeightTrackerGUI:
             messagebox.showerror("Invalid weight", "Please enter a numeric weight value.")
             return
 
+        # Ensure data dir exists and target path chosen
+        os.makedirs(self.data_dir, exist_ok=True)
+        weights_target = os.path.join(self.data_dir, "weights.csv")
+
         args = [sys.executable or "python3", os.path.join(self.project_dir, "weight_tracker.py"),
-                "--csv", self.var_csv.get().strip(), "--add", f"{d}:{w_str}",
+                "--csv", weights_target, "--add", f"{d}:{w_str}",
                 "--no-plot", "--no-kalman-plot", "--no-display"]
 
         self._append_output("Appending weight entry via CLI: " + " ".join(args))
@@ -346,7 +395,8 @@ class WeightTrackerGUI:
             messagebox.showerror("Invalid LBM", "Please enter a numeric LBM value.")
             return
 
-        target = self.var_lbm.get().strip() or os.path.join(self.project_dir, "lbm.csv")
+        os.makedirs(self.data_dir, exist_ok=True)
+        target = os.path.join(self.data_dir, "lbm.csv")
         try:
             # Ensure directory exists
             os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
