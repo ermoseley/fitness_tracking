@@ -34,6 +34,18 @@ class WeightTrackerGUI:
         # Allow both horizontal and vertical resizing
         self.root.resizable(True, True)
         self.root.minsize(640, 420)
+        
+        # Fix for macOS button responsiveness issues
+        self.root.update_idletasks()
+        self.root.lift()
+        self.root.attributes('-topmost', True)
+        self.root.after_idle(lambda: self.root.attributes('-topmost', False))
+        
+        # Note: Avoid global focus/click bindings which can steal focus from inputs on macOS
+        
+        # Disable aggressive periodic refresh that causes responsiveness issues
+        # self._refresh_timer_id = None
+        # self._schedule_gui_refresh()
 
         self.project_dir = os.path.dirname(os.path.abspath(__file__))
         self.data_dir = os.path.join(self.project_dir, "data")
@@ -57,6 +69,8 @@ class WeightTrackerGUI:
         self.var_add_weight_value = tk.StringVar(value="")
         self.var_add_lbm_date = tk.StringVar(value=today_iso)
         self.var_add_lbm_value = tk.StringVar(value="")
+        self.var_add_bf_date = tk.StringVar(value=today_iso)
+        self.var_add_bf_value = tk.StringVar(value="")
 
         # Layout
         pad = {"padx": 8, "pady": 6}
@@ -140,6 +154,21 @@ class WeightTrackerGUI:
         tk.Button(root, text="Add to LBM CSV", command=self._on_add_lbm).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
+        tk.Label(root, text="Add Body Fat %:").grid(row=row, column=0, sticky="e", **pad)
+        bf_frame = tk.Frame(root)
+        bf_frame.grid(row=row, column=1, sticky="we", **pad)
+        # Configure bf_frame columns to match other frames
+        bf_frame.grid_columnconfigure(0, weight=0)  # DateTime label
+        bf_frame.grid_columnconfigure(1, weight=0)  # DateTime entry
+        bf_frame.grid_columnconfigure(2, weight=0)  # BF label
+        bf_frame.grid_columnconfigure(3, weight=0)  # BF entry
+        tk.Label(bf_frame, text="DateTime (YYYY-MM-DD[THH:MM:SS]):").grid(row=0, column=0, sticky="e", padx=(0, 6))
+        tk.Entry(bf_frame, textvariable=self.var_add_bf_date, width=12).grid(row=0, column=1, sticky="w", padx=(0, 12))
+        tk.Label(bf_frame, text="Body Fat (%):", width=12, anchor="e").grid(row=0, column=2, sticky="e", padx=(0, 6))
+        tk.Entry(bf_frame, textvariable=self.var_add_bf_value, width=10).grid(row=0, column=3, sticky="w", padx=(0, 12))
+        tk.Button(root, text="Add to LBM CSV", command=self._on_add_bf).grid(row=row, column=2, sticky="w", **pad)
+
+        row += 1
         self.output = scrolledtext.ScrolledText(root, height=14, width=80, wrap="word")
         self.output.grid(row=row, column=0, columnspan=3, sticky="nsew", padx=8, pady=(0, 8))
         # Make the main content column and the output row expand with the window
@@ -150,15 +179,52 @@ class WeightTrackerGUI:
         path = filedialog.askopenfilename(title="Select weights CSV", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if path:
             self.var_csv.set(path)
+        # Simple focus restoration
+        self.root.focus_force()
+        self.root.lift()
 
     def _browse_lbm(self) -> None:
         path = filedialog.askopenfilename(title="Select LBM CSV", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if path:
             self.var_lbm.set(path)
+        # Simple focus restoration
+        self.root.focus_force()
+        self.root.lift()
 
     def _append_output(self, text: str) -> None:
         self.output.insert(tk.END, text + "\n")
         self.output.see(tk.END)
+        # Force GUI update to prevent button freezing
+        self.root.update_idletasks()
+    
+    def _append_output_safe(self, text: str) -> None:
+        """Thread-safe append to output text widget."""
+        self.root.after(0, lambda: self._append_output(text))
+    
+    def _refresh_gui(self) -> None:
+        """Refresh GUI to prevent button freezing issues"""
+        self.root.update_idletasks()
+        # Less aggressive update
+        self.root.after(10, lambda: None)
+    
+    def _on_focus_in(self, event) -> None:
+        """Handle window focus events to ensure responsiveness"""
+        self.root.update_idletasks()
+    
+    def _on_click(self, event) -> None:
+        """Handle click events to ensure window stays active"""
+        self.root.focus_force()
+        self.root.update_idletasks()
+    
+    def _schedule_gui_refresh(self) -> None:
+        """Schedule periodic GUI refresh to prevent freezing"""
+        self.root.update_idletasks()
+        # Schedule next refresh in 500ms (less aggressive)
+        self._refresh_timer_id = self.root.after(500, self._schedule_gui_refresh)
+    
+    def _restart_refresh_timer(self) -> None:
+        """Restart the refresh timer after file dialogs"""
+        self._schedule_gui_refresh()
 
     def _open_file(self, path: str) -> None:
         if not os.path.exists(path):
@@ -329,13 +395,16 @@ class WeightTrackerGUI:
                 proc = subprocess.Popen(args, cwd=self.project_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 assert proc.stdout is not None
                 for line in proc.stdout:
-                    self._append_output(line.rstrip())
+                    self._append_output_safe(line.rstrip())
                 code = proc.wait()
-                self._append_output(f"Process exited with code {code}")
+                self._append_output_safe(f"Process exited with code {code}")
                 if code == 0:
-                    self._append_output("Done. You can click the buttons to open the generated plots.")
+                    self._append_output_safe("Done. You can click the buttons to open the generated plots.")
+                # Final GUI refresh
+                self.root.after(1, self._refresh_gui)
             except Exception as e:
-                self._append_output("Error: " + str(e))
+                self._append_output_safe("Error: " + str(e))
+                self.root.after(1, self._refresh_gui)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -367,21 +436,23 @@ class WeightTrackerGUI:
                 "--csv", weights_target, "--add", f"{d}:{w_str}",
                 "--no-plot", "--no-kalman-plot", "--no-display"]
 
-        self._append_output("Appending weight entry via CLI: " + " ".join(args))
+        self._append_output_safe("Appending weight entry via CLI: " + " ".join(args))
 
         def worker() -> None:
             try:
                 proc = subprocess.Popen(args, cwd=self.project_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 assert proc.stdout is not None
                 for line in proc.stdout:
-                    self._append_output(line.rstrip())
+                    self._append_output_safe(line.rstrip())
                 code = proc.wait()
                 if code == 0:
-                    self._append_output("Weight entry added.")
+                    self._append_output_safe("Weight entry added.")
                 else:
-                    self._append_output(f"Failed to add weight entry (exit {code}).")
+                    self._append_output_safe(f"Failed to add weight entry (exit {code}).")
+                # Final GUI refresh
+                pass
             except Exception as e:
-                self._append_output("Error adding weight entry: " + str(e))
+                self._append_output_safe("Error adding weight entry: " + str(e))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -419,10 +490,91 @@ class WeightTrackerGUI:
                 if need_header:
                     f.write("date,lbm\n")
                 f.write(f"{d},{v_str}\n")
-            self._append_output(f"LBM entry added to {target}: {d},{v_str}")
+            self._append_output_safe(f"LBM entry added to {target}: {d},{v_str}")
         except Exception as e:
             messagebox.showerror("LBM append failed", str(e))
-            self._append_output("LBM append failed: " + str(e))
+            self._append_output_safe("LBM append failed: " + str(e))
+
+    def _on_add_bf(self) -> None:
+        d = self.var_add_bf_date.get().strip()
+        bf_str = self.var_add_bf_value.get().strip()
+        if not self._validate_datetime(d):
+            messagebox.showerror("Invalid datetime", "Please enter a valid datetime in YYYY-MM-DD[THH:MM:SS] format for body fat entry.")
+            return
+        try:
+            bf_percent = float(bf_str)
+            if bf_percent < 0 or bf_percent > 100:
+                messagebox.showerror("Invalid body fat", "Body fat percentage must be between 0 and 100.")
+                return
+        except Exception:
+            messagebox.showerror("Invalid body fat", "Please enter a numeric body fat percentage.")
+            return
+
+        # Run Kalman calculation in background thread
+        def worker() -> None:
+            try:
+                from weight_tracker import load_entries
+                from kalman import run_kalman_smoother
+                
+                # Load current data
+                weights_path = os.path.join(self.data_dir, "weights.csv")
+                if not os.path.exists(weights_path):
+                    self._append_output("Error: No weight data found. Please add weight entries first.")
+                    return
+                
+                entries = load_entries(weights_path)
+                if not entries:
+                    self._append_output("Error: No weight data found. Please add weight entries first.")
+                    return
+                
+                # Run Kalman filter to get current weight estimate
+                kalman_states, kalman_dates = run_kalman_smoother(entries)
+                if not kalman_states:
+                    self._append_output("Error: Failed to get weight estimate from Kalman filter.")
+                    return
+                
+                # Get the most recent weight estimate
+                current_weight = kalman_states[-1].weight
+                
+                # Calculate LBM: LBM = weight * (1 - body_fat_percent/100)
+                lbm = current_weight * (1.0 - bf_percent / 100.0)
+                
+                # Add to LBM CSV
+                os.makedirs(self.data_dir, exist_ok=True)
+                target = os.path.join(self.data_dir, "lbm.csv")
+                
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+                need_header = not os.path.exists(target) or os.path.getsize(target) == 0
+                need_leading_newline = False
+                if not need_header:
+                    try:
+                        size = os.path.getsize(target)
+                        if size > 0:
+                            with open(target, "rb") as frb:
+                                try:
+                                    frb.seek(-1, os.SEEK_END)
+                                    last_byte = frb.read(1)
+                                    if last_byte not in (b"\n", b"\r"):
+                                        need_leading_newline = True
+                                except OSError:
+                                    pass
+                    except OSError:
+                        pass
+                with open(target, "a", newline="") as f:
+                    if need_leading_newline:
+                        f.write("\n")
+                    if need_header:
+                        f.write("date,lbm\n")
+                    f.write(f"{d},{lbm:.3f}\n")
+                
+                self._append_output_safe(f"Body fat {bf_percent}% converted to LBM {lbm:.3f} lb and added to {target}")
+                
+            except Exception as e:
+                self._append_output_safe("Body fat conversion failed: " + str(e))
+        
+        self._append_output_safe("Converting body fat percentage to LBM...")
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_residuals_histogram(self) -> None:
         """Generate residuals histogram and normality test"""
