@@ -1,0 +1,8 @@
+{
+  "slope": 2.156459425386507,
+  "intercept": -29.253274500696804,
+  "r_squared": 1.0,
+  "rmse": 7.105427357601002e-15,
+  "calibration_date": "2025-09-04T14:59:27.051804",
+  "equation": "DEXA_fat_mass = -29.253275 + 2.156459 * impedance_fat_mass"
+}

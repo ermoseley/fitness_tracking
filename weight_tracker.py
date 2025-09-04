@@ -32,7 +32,7 @@ class WeightEntry:
 DEFAULT_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DATA_DIR = os.path.join(DEFAULT_BASE_DIR, "data")
 DEFAULT_WEIGHTS_CSV = os.path.join(DEFAULT_DATA_DIR, "weights.csv")
-DEFAULT_LBM_CSV = os.path.join(DEFAULT_DATA_DIR, "lbm.csv")
+DEFAULT_FAT_MASS_CSV = os.path.join(DEFAULT_DATA_DIR, "fat_mass.csv")
 
 DATETIME_FORMATS = [
     "%Y-%m-%d %H:%M:%S",     # 2025-08-19 14:30:00
@@ -478,6 +478,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-bodyfat-plot", action="store_true", help="Do not generate body fat plot")
     parser.add_argument("--no-bmi-plot", action="store_true", help="Do not generate BMI plot")
     parser.add_argument("--no-ffmi-plot", action="store_true", help="Do not generate FFMI plot")
+    parser.add_argument("--no-lbm-plot", action="store_true", help="Do not generate LBM plot")
+    parser.add_argument("--no-fatmass-plot", action="store_true", help="Do not generate Fat Mass plot")
     parser.add_argument("--kalman-mode", choices=["filter", "smoother"], default="smoother",
                         help="Use forward Kalman filter ('filter') or RTS smoother ('smoother') for historical trend")
     parser.add_argument("--print-table", action="store_true", help="Print table of date, weight, EMA")
@@ -487,13 +489,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bf-baseline-weight", type=float, default=None,
                         help="Baseline total weight in lb (default: first Kalman mean)")
     parser.add_argument("--no-display", action="store_true", help="Do not display plots in a GUI")
-    parser.add_argument("--lbm-csv", type=str, default=DEFAULT_LBM_CSV,
-                        help="Optional CSV with 'date,lbm' to drive body fat plot via interpolated LBM. Default: data/lbm.csv")
+    parser.add_argument("--fat-mass-csv", type=str, default=DEFAULT_FAT_MASS_CSV,
+                        help="Optional CSV with 'date,fat_mass' to drive body fat plot via interpolated fat mass. Default: data/fat_mass.csv")
     parser.add_argument("--start", type=str, help="Start date for plotting (YYYY-MM-DD format). If not specified, shows all data from beginning.")
     parser.add_argument("--end", type=str, help="End date for plotting (YYYY-MM-DD format). If not specified, shows all data to end.")
     parser.add_argument("--residuals-histogram", action="store_true", help="Generate residuals histogram and normality test")
     parser.add_argument("--confidence-interval", choices=["1σ", "95%"], default="95%", help="Confidence interval level for all plots and calculations")
     parser.add_argument("--aggregation-hours", type=float, default=3.0, help="Aggregation window in hours (0 to disable). Default: 3")
+    parser.add_argument("--calibrated-bf-csv", type=str, default="data/calibrated_fat_mass_final.csv",
+                        help="Path to DEXA-calibrated body fat CSV. Default: data/calibrated_fat_mass_final.csv")
     return parser.parse_args()
 
 
@@ -604,7 +608,8 @@ def main() -> None:
     ci_multiplier = get_confidence_multiplier(args.confidence_interval)
     
     # Run Kalman algorithm if any Kalman-dependent plots are requested
-    if not args.no_kalman_plot or not args.no_bodyfat_plot or not args.no_bmi_plot or not args.no_ffmi_plot:
+    if (not args.no_kalman_plot or not args.no_bodyfat_plot or not args.no_bmi_plot or
+        not args.no_ffmi_plot or not args.no_lbm_plot or not args.no_fatmass_plot):
         try:
             # Run Kalman algorithm per mode
             if args.kalman_mode == "smoother":
@@ -625,24 +630,22 @@ def main() -> None:
             create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier)
             print("Kalman plot saved to: weight_trend.png")
         
-        # Create body fat plot using Kalman smoothing (if not disabled)
+        # Create body fat plot using DEXA-calibrated data (if not disabled)
         if not args.no_bodyfat_plot:
-            from kalman import create_bodyfat_plot_from_kalman
+            from kalman import create_bodyfat_plot_from_calibrated
             try:
-                create_bodyfat_plot_from_kalman(
+                create_bodyfat_plot_from_calibrated(
                     entries,
                     kalman_states,
                     kalman_dates,
-                    baseline_weight_lb=args.bf_baseline_weight,
-                    baseline_lean_lb=args.bf_baseline_lean,
+                    calibrated_bf_csv=args.calibrated_bf_csv,
                     output_path="bodyfat_trend.png",
                     no_display=args.no_display,
                     start_date=start_date,
                     end_date=end_date,
-                    lbm_csv=args.lbm_csv,
                     ci_multiplier=ci_multiplier,
                 )
-                print("Body fat plot saved to: bodyfat_trend.png")
+                print("DEXA-calibrated body fat plot saved to: bodyfat_trend.png")
             except Exception as e:
                 print(f"Failed to generate body fat plot: {e}")
         
@@ -665,25 +668,63 @@ def main() -> None:
             except Exception as e:
                 print(f"Failed to generate BMI plot: {e}")
         
-        # Create FFMI plot using Kalman smoothing (if not disabled)
+        # Create FFMI plot using DEXA-calibrated data (if not disabled)
         if not args.no_ffmi_plot:
-            from kalman import create_ffmi_plot_from_kalman
+            from kalman import create_ffmi_plot_from_calibrated
             try:
-                create_ffmi_plot_from_kalman(
+                create_ffmi_plot_from_calibrated(
                     entries,
                     kalman_states,
                     kalman_dates,
+                    calibrated_bf_csv=args.calibrated_bf_csv,
                     height_file="data/height.txt",
                     output_path="ffmi_trend.png",
                     no_display=args.no_display,
                     start_date=start_date,
                     end_date=end_date,
-                    lbm_csv=args.lbm_csv,
                     ci_multiplier=ci_multiplier,
                 )
-                print("FFMI plot saved to: ffmi_trend.png")
+                print("DEXA-calibrated FFMI plot saved to: ffmi_trend.png")
             except Exception as e:
                 print(f"Failed to generate FFMI plot: {e}")
+
+        # Create LBM plot using DEXA-calibrated data (if not disabled)
+        if not args.no_lbm_plot:
+            from kalman import create_lbm_plot_from_calibrated
+            try:
+                create_lbm_plot_from_calibrated(
+                    entries,
+                    kalman_states,
+                    kalman_dates,
+                    calibrated_bf_csv=args.calibrated_bf_csv,
+                    output_path="lbm_trend.png",
+                    no_display=args.no_display,
+                    start_date=start_date,
+                    end_date=end_date,
+                    ci_multiplier=ci_multiplier,
+                )
+                print("DEXA-calibrated LBM plot saved to: lbm_trend.png")
+            except Exception as e:
+                print(f"Failed to generate LBM plot: {e}")
+
+        # Create Fat Mass plot using DEXA-calibrated data (if not disabled)
+        if not args.no_fatmass_plot:
+            from kalman import create_fatmass_plot_from_calibrated
+            try:
+                create_fatmass_plot_from_calibrated(
+                    entries,
+                    kalman_states,
+                    kalman_dates,
+                    calibrated_bf_csv=args.calibrated_bf_csv,
+                    output_path="fatmass_trend.png",
+                    no_display=args.no_display,
+                    start_date=start_date,
+                    end_date=end_date,
+                    ci_multiplier=ci_multiplier,
+                )
+                print("DEXA-calibrated fat mass plot saved to: fatmass_trend.png")
+            except Exception as e:
+                print(f"Failed to generate Fat mass plot: {e}")
         
         # Print Kalman filter summary
         latest_kalman = kalman_states[-1]

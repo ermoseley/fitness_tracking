@@ -54,7 +54,7 @@ class WeightTrackerGUI:
 
         # Variables
         self.var_csv = tk.StringVar(value=default_csv)
-        self.var_lbm = tk.StringVar(value=default_lbm)
+        self.var_fat_mass = tk.StringVar(value=default_lbm)
         self.var_start = tk.StringVar(value="")
         self.var_end = tk.StringVar(value="")
         self.var_kalman_mode = tk.StringVar(value="smoother")
@@ -64,6 +64,8 @@ class WeightTrackerGUI:
         self.var_show_bodyfat_plot = tk.BooleanVar(value=True)
         self.var_show_bmi_plot = tk.BooleanVar(value=False)
         self.var_show_ffmi_plot = tk.BooleanVar(value=False)
+        self.var_show_lbm_plot = tk.BooleanVar(value=False)
+        self.var_show_fatmass_plot = tk.BooleanVar(value=False)
         self.var_show_residuals_plot = tk.BooleanVar(value=False)
         self.var_aggregation_hours = tk.StringVar(value="3")
         self.var_no_display = tk.BooleanVar(value=False)
@@ -72,8 +74,8 @@ class WeightTrackerGUI:
         today_iso = date.today().isoformat()
         self.var_add_weight_date = tk.StringVar(value=today_iso)
         self.var_add_weight_value = tk.StringVar(value="")
-        self.var_add_lbm_date = tk.StringVar(value=today_iso)
-        self.var_add_lbm_value = tk.StringVar(value="")
+        self.var_add_fat_mass_date = tk.StringVar(value=today_iso)
+        self.var_add_fat_mass_value = tk.StringVar(value="")
         self.var_add_bf_date = tk.StringVar(value=today_iso)
         self.var_add_bf_value = tk.StringVar(value="")
         self.var_height_value = tk.StringVar(value="")
@@ -88,9 +90,9 @@ class WeightTrackerGUI:
         tk.Button(root, text="Browse", command=self._browse_csv).grid(row=row, column=2, **pad)
 
         row += 1
-        tk.Label(root, text="Upload LBM CSV (optional):").grid(row=row, column=0, sticky="e", **pad)
-        tk.Entry(root, textvariable=self.var_lbm, width=52).grid(row=row, column=1, sticky="we", **pad)
-        tk.Button(root, text="Browse", command=self._browse_lbm).grid(row=row, column=2, **pad)
+        tk.Label(root, text="Upload Fat Mass CSV (optional):").grid(row=row, column=0, sticky="e", **pad)
+        tk.Entry(root, textvariable=self.var_fat_mass, width=52).grid(row=row, column=1, sticky="we", **pad)
+        tk.Button(root, text="Browse", command=self._browse_fat_mass).grid(row=row, column=2, **pad)
 
         row += 1
         tk.Label(root, text="Start date (YYYY-MM-DD[THH:MM:SS]):").grid(row=row, column=0, sticky="e", **pad)
@@ -120,7 +122,8 @@ class WeightTrackerGUI:
         tk.Checkbutton(plot_frame, text="Body fat %", variable=self.var_show_bodyfat_plot).grid(row=0, column=1, sticky="w", padx=(0, 12))
         tk.Checkbutton(plot_frame, text="BMI", variable=self.var_show_bmi_plot).grid(row=0, column=2, sticky="w", padx=(0, 12))
         tk.Checkbutton(plot_frame, text="FFMI", variable=self.var_show_ffmi_plot).grid(row=0, column=3, sticky="w", padx=(0, 12))
-        tk.Checkbutton(plot_frame, text="Residuals histogram", variable=self.var_show_residuals_plot).grid(row=0, column=4, sticky="w")
+        tk.Checkbutton(plot_frame, text="LBM", variable=self.var_show_lbm_plot).grid(row=0, column=4, sticky="w", padx=(0, 12))
+        tk.Checkbutton(plot_frame, text="Fat mass (lb)", variable=self.var_show_fatmass_plot).grid(row=0, column=5, sticky="w")
 
         row += 1
         tk.Checkbutton(root, text="Save plots as PNG files", variable=self.var_show_weight).grid(row=row, column=1, sticky="w", **pad)
@@ -144,6 +147,12 @@ class WeightTrackerGUI:
         row += 1
         tk.Button(root, text="Open residuals plot", command=lambda: self._open_file(os.path.join(self.project_dir, "residuals_histogram.png"))).grid(row=row, column=2, sticky="w", **pad)
 
+        row += 1
+        tk.Button(root, text="Open LBM plot", command=lambda: self._open_file(os.path.join(self.project_dir, "lbm_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
+
+        row += 1
+        tk.Button(root, text="Open Fat mass plot", command=lambda: self._open_file(os.path.join(self.project_dir, "fatmass_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
+
         # Add entries section
         row += 1
         tk.Label(root, text="Add Weight Entry:").grid(row=row, column=0, sticky="e", **pad)
@@ -161,19 +170,19 @@ class WeightTrackerGUI:
         tk.Button(root, text="Add to weights.csv", command=self._on_add_weight).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
-        tk.Label(root, text="Add LBM Entry:").grid(row=row, column=0, sticky="e", **pad)
-        lbm_frame = tk.Frame(root)
-        lbm_frame.grid(row=row, column=1, sticky="we", **pad)
-        # Configure lbm_frame columns to match weight_frame
-        lbm_frame.grid_columnconfigure(0, weight=0)  # DateTime label
-        lbm_frame.grid_columnconfigure(1, weight=0)  # DateTime entry
-        lbm_frame.grid_columnconfigure(2, weight=0)  # LBM label
-        lbm_frame.grid_columnconfigure(3, weight=0)  # LBM entry
-        tk.Label(lbm_frame, text="DateTime (YYYY-MM-DD[THH:MM:SS]):").grid(row=0, column=0, sticky="e", padx=(0, 6))
-        tk.Entry(lbm_frame, textvariable=self.var_add_lbm_date, width=12).grid(row=0, column=1, sticky="w", padx=(0, 12))
-        tk.Label(lbm_frame, text="LBM (lb):", width=12, anchor="e").grid(row=0, column=2, sticky="e", padx=(0, 6))
-        tk.Entry(lbm_frame, textvariable=self.var_add_lbm_value, width=10).grid(row=0, column=3, sticky="w", padx=(0, 12))
-        tk.Button(root, text="Add to LBM CSV", command=self._on_add_lbm).grid(row=row, column=2, sticky="w", **pad)
+        tk.Label(root, text="Add Fat Mass Entry:").grid(row=row, column=0, sticky="e", **pad)
+        fat_mass_frame = tk.Frame(root)
+        fat_mass_frame.grid(row=row, column=1, sticky="we", **pad)
+        # Configure fat_mass_frame columns to match weight_frame
+        fat_mass_frame.grid_columnconfigure(0, weight=0)  # DateTime label
+        fat_mass_frame.grid_columnconfigure(1, weight=0)  # DateTime entry
+        fat_mass_frame.grid_columnconfigure(2, weight=0)  # Fat Mass label
+        fat_mass_frame.grid_columnconfigure(3, weight=0)  # Fat Mass entry
+        tk.Label(fat_mass_frame, text="DateTime (YYYY-MM-DD[THH:MM:SS]):").grid(row=0, column=0, sticky="e", padx=(0, 6))
+        tk.Entry(fat_mass_frame, textvariable=self.var_add_fat_mass_date, width=12).grid(row=0, column=1, sticky="w", padx=(0, 12))
+        tk.Label(fat_mass_frame, text="Fat Mass (lb):", width=12, anchor="e").grid(row=0, column=2, sticky="e", padx=(0, 6))
+        tk.Entry(fat_mass_frame, textvariable=self.var_add_fat_mass_value, width=10).grid(row=0, column=3, sticky="w", padx=(0, 12))
+        tk.Button(root, text="Add to Fat Mass CSV", command=self._on_add_fat_mass).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
         tk.Label(root, text="Add Body Fat %:").grid(row=row, column=0, sticky="e", **pad)
@@ -221,10 +230,10 @@ class WeightTrackerGUI:
         self.root.focus_force()
         self.root.lift()
 
-    def _browse_lbm(self) -> None:
-        path = filedialog.askopenfilename(title="Select LBM CSV", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+    def _browse_fat_mass(self) -> None:
+        path = filedialog.askopenfilename(title="Select Fat Mass CSV", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if path:
-            self.var_lbm.set(path)
+            self.var_fat_mass.set(path)
         # Simple focus restoration
         self.root.focus_force()
         self.root.lift()
@@ -290,9 +299,9 @@ class WeightTrackerGUI:
             os.makedirs(self.data_dir, exist_ok=True)
             # CSVs (upload semantics)
             weights_target = os.path.join(self.data_dir, "weights.csv")
-            lbm_target = os.path.join(self.data_dir, "lbm.csv")
+            fat_mass_target = os.path.join(self.data_dir, "fat_mass.csv")
             src_weights = self.var_csv.get().strip()
-            src_lbm = self.var_lbm.get().strip()
+            src_fat_mass = self.var_fat_mass.get().strip()
             if src_weights:
                 try:
                     if os.path.abspath(src_weights) != os.path.abspath(weights_target):
@@ -301,13 +310,13 @@ class WeightTrackerGUI:
                     messagebox.showerror("Upload failed", f"Failed to upload weights CSV: {e}")
                 args += ["--csv", weights_target]
             # If not provided, rely on default in weight_tracker (data/weights.csv)
-            if src_lbm:
+            if src_fat_mass:
                 try:
-                    if os.path.abspath(src_lbm) != os.path.abspath(lbm_target):
-                        shutil.copy2(src_lbm, lbm_target)
+                    if os.path.abspath(src_fat_mass) != os.path.abspath(fat_mass_target):
+                        shutil.copy2(src_fat_mass, fat_mass_target)
                 except Exception as e:
-                    messagebox.showerror("Upload failed", f"Failed to upload LBM CSV: {e}")
-                args += ["--lbm-csv", lbm_target]
+                    messagebox.showerror("Upload failed", f"Failed to upload Fat Mass CSV: {e}")
+                args += ["--fat-mass-csv", fat_mass_target]
             # Dates
             if self.var_start.get().strip():
                 args += ["--start", self.var_start.get().strip()]
@@ -331,6 +340,11 @@ class WeightTrackerGUI:
                 args += ["--no-bmi-plot"]
             if not self.var_show_ffmi_plot.get():
                 args += ["--no-ffmi-plot"]
+            if not self.var_show_lbm_plot.get():
+                args += ["--no-lbm-plot"]
+            if not self.var_show_fatmass_plot.get():
+                args += ["--no-fatmass-plot"]
+            # LBM and Fat mass always enabled for now (no checkboxes)
             if self.var_show_residuals_plot.get():
                 args += ["--residuals-histogram"]
             if not self.var_show_weight.get():
@@ -364,7 +378,7 @@ class WeightTrackerGUI:
             # Ensure data dir exists
             os.makedirs(self.data_dir, exist_ok=True)
             weights_target = os.path.join(self.data_dir, "weights.csv")
-            lbm_target = os.path.join(self.data_dir, "lbm.csv")
+            fat_mass_target = os.path.join(self.data_dir, "fat_mass.csv")
             # Add arguments based on GUI settings (upload semantics)
             if self.var_csv.get().strip():
                 src_weights = self.var_csv.get().strip()
@@ -374,14 +388,14 @@ class WeightTrackerGUI:
                 except Exception as e:
                     self._append_output(f"Upload weights CSV failed: {e}")
                 sys.argv += ["--csv", weights_target]
-            if self.var_lbm.get().strip():
-                src_lbm = self.var_lbm.get().strip()
+            if self.var_fat_mass.get().strip():
+                src_fat_mass = self.var_fat_mass.get().strip()
                 try:
-                    if os.path.abspath(src_lbm) != os.path.abspath(lbm_target):
-                        shutil.copy2(src_lbm, lbm_target)
+                    if os.path.abspath(src_fat_mass) != os.path.abspath(fat_mass_target):
+                        shutil.copy2(src_fat_mass, fat_mass_target)
                 except Exception as e:
-                    self._append_output(f"Upload LBM CSV failed: {e}")
-                sys.argv += ["--lbm-csv", lbm_target]
+                    self._append_output(f"Upload Fat Mass CSV failed: {e}")
+                sys.argv += ["--fat-mass-csv", fat_mass_target]
             if self.var_start.get().strip():
                 sys.argv += ["--start", self.var_start.get().strip()]
             if self.var_end.get().strip():
@@ -398,6 +412,11 @@ class WeightTrackerGUI:
                 sys.argv += ["--no-bmi-plot"]
             if not self.var_show_ffmi_plot.get():
                 sys.argv += ["--no-ffmi-plot"]
+            if not self.var_show_lbm_plot.get():
+                sys.argv += ["--no-lbm-plot"]
+            if not self.var_show_fatmass_plot.get():
+                sys.argv += ["--no-fatmass-plot"]
+            # LBM and Fat mass always enabled for now (no checkboxes)
             if self.var_show_residuals_plot.get():
                 sys.argv += ["--residuals-histogram"]
             if not self.var_show_weight.get():
@@ -516,20 +535,20 @@ class WeightTrackerGUI:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_add_lbm(self) -> None:
-        d = self.var_add_lbm_date.get().strip()
-        v_str = self.var_add_lbm_value.get().strip()
+    def _on_add_fat_mass(self) -> None:
+        d = self.var_add_fat_mass_date.get().strip()
+        v_str = self.var_add_fat_mass_value.get().strip()
         if not self._validate_datetime(d):
-            messagebox.showerror("Invalid datetime", "Please enter a valid datetime in YYYY-MM-DD[THH:MM:SS] format for LBM entry.")
+            messagebox.showerror("Invalid datetime", "Please enter a valid datetime in YYYY-MM-DD[THH:MM:SS] format for Fat Mass entry.")
             return
         try:
             float(v_str)
         except Exception:
-            messagebox.showerror("Invalid LBM", "Please enter a numeric LBM value.")
+            messagebox.showerror("Invalid Fat Mass", "Please enter a numeric Fat Mass value.")
             return
 
         os.makedirs(self.data_dir, exist_ok=True)
-        target = os.path.join(self.data_dir, "lbm.csv")
+        target = os.path.join(self.data_dir, "fat_mass.csv")
         try:
             # Ensure directory exists
             os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
@@ -548,12 +567,12 @@ class WeightTrackerGUI:
                 if need_leading_newline:
                     f.write("\n")
                 if need_header:
-                    f.write("date,lbm\n")
+                    f.write("date,fat_mass\n")
                 f.write(f"{d},{v_str}\n")
-            self._append_output_safe(f"LBM entry added to {target}: {d},{v_str}")
+            self._append_output_safe(f"Fat Mass entry added to {target}: {d},{v_str}")
         except Exception as e:
-            messagebox.showerror("LBM append failed", str(e))
-            self._append_output_safe("LBM append failed: " + str(e))
+            messagebox.showerror("Fat Mass append failed", str(e))
+            self._append_output_safe("Fat Mass append failed: " + str(e))
 
     def _on_add_bf(self) -> None:
         d = self.var_add_bf_date.get().strip()

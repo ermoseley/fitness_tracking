@@ -2,6 +2,7 @@ To do list (small):
 1. Include BF data calibrated w/ DEXA. More details to sort out here too.
 4. Rename kalman.py to kalman_filter.py
 5. Add uncertainty fan/prediction one month out.
+6. "import fit index data"a ed 
 
 
 To do list (big):

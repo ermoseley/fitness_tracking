@@ -10,6 +10,11 @@ from scipy import stats
 import matplotlib.pyplot as plt
 import csv
 
+@dataclass
+class WeightEntry:
+    """Weight entry with datetime and weight value"""
+    entry_datetime: datetime
+    weight: float
 
 @dataclass
 class KalmanState:
@@ -172,7 +177,8 @@ class WeightKalmanFilter:
 
 def run_kalman_filter(entries, 
                      initial_weight: Optional[float] = None,
-                     initial_velocity: float = 0.0) -> Tuple[List[KalmanState], List[date]]:
+                     initial_velocity: float = 0.0,
+                     data_scale_factor: float = 1.0) -> Tuple[List[KalmanState], List[date]]:
     """
     Run Kalman filter on weight entries
     
@@ -180,6 +186,7 @@ def run_kalman_filter(entries,
         entries: List of WeightEntry objects
         initial_weight: Starting weight (defaults to first measurement)
         initial_velocity: Starting velocity estimate
+        data_scale_factor: Scale factor for noise parameters (1.0 for weight data, ~0.1 for body fat %)
         
     Returns:
         (kalman_states, dates)
@@ -191,9 +198,19 @@ def run_kalman_filter(entries,
     if initial_weight is None:
         initial_weight = entries[0].weight
     
+    # Scale noise parameters based on data range
+    scaled_measurement_noise = 0.5 * data_scale_factor
+    scaled_process_noise_weight = 0.01 * data_scale_factor
+    scaled_process_noise_velocity = 0.001 * data_scale_factor
+    scaled_initial_velocity_var = 0.25 * data_scale_factor
+    
     kf = WeightKalmanFilter(
         initial_weight=initial_weight,
-        initial_velocity=initial_velocity
+        initial_velocity=initial_velocity,
+        process_noise_weight=scaled_process_noise_weight,
+        process_noise_velocity=scaled_process_noise_velocity,
+        measurement_noise=scaled_measurement_noise,
+        initial_velocity_var=scaled_initial_velocity_var
     )
     
     states = []
@@ -488,7 +505,7 @@ def compute_kalman_mean_std_spline(states, dates) -> Tuple[List[datetime], List[
     return dense_datetimes, [float(v) for v in dense_mean], [float(max(float(s), 0.0)) for s in dense_std]
 
 
-def _load_lbm_csv(path: str) -> List[Tuple[date, float]]:
+def _load_fat_mass_csv(path: str) -> List[Tuple[date, float]]:
     points: List[Tuple[date, float]] = []
     try:
         with open(path, "r", newline="") as f:
@@ -510,13 +527,70 @@ def _load_lbm_csv(path: str) -> List[Tuple[date, float]]:
     points.sort(key=lambda p: p[0])
     return points
 
+def _load_calibrated_bf_csv(path: str) -> List[Tuple[datetime, float]]:
+    """Load calibrated body fat data from CSV file."""
+    points: List[Tuple[datetime, float]] = []
+    try:
+        with open(path, "r", newline="") as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            for row in reader:
+                if not row or len(row) < 2:
+                    continue
+                try:
+                    dt_str = str(row[0]).strip()
+                    bf_str = str(row[1]).strip()  # body_fat_pct_cal column (index 1)
+                    dt = datetime.fromisoformat(dt_str)
+                    bf = float(bf_str)
+                    points.append((dt, bf))
+                except Exception:
+                    # skip bad rows
+                    continue
+    except Exception:
+        return []
+    points.sort(key=lambda p: p[0])
+    return points
 
-def _evaluate_lbm_series(target_datetimes: List[datetime], lbm_points: List[Tuple[date, float]]) -> List[float]:
-    if not lbm_points:
+
+def _evaluate_lbm_series(target_datetimes: List[datetime], fat_mass_points: List[Tuple[date, float]]) -> List[float]:
+    if not fat_mass_points:
         return [0.0 for _ in target_datetimes]
     # Build lists of datetimes and values
-    pts_dt = [datetime.combine(d, datetime.min.time()) for d, _ in lbm_points]
-    pts_val = [float(v) for _, v in lbm_points]
+    pts_dt = [datetime.combine(d, datetime.min.time()) for d, _ in fat_mass_points]
+    pts_val = [float(v) for _, v in fat_mass_points]
+
+    # For each target time, piecewise linear interpolate; constant after last point
+    out: List[float] = []
+    for t in target_datetimes:
+        if t <= pts_dt[0]:
+            out.append(pts_val[0])
+            continue
+        if t >= pts_dt[-1]:
+            out.append(pts_val[-1])
+            continue
+        # find the interval
+        idx = 1
+        while idx < len(pts_dt) and not (pts_dt[idx-1] <= t <= pts_dt[idx]):
+            idx += 1
+        if idx >= len(pts_dt):
+            out.append(pts_val[-1])
+            continue
+        t0, t1 = pts_dt[idx-1], pts_dt[idx]
+        v0, v1 = pts_val[idx-1], pts_val[idx]
+        # linear interpolation
+        span = (t1 - t0).total_seconds()
+        alpha = 0.0 if span <= 0 else (t - t0).total_seconds() / span
+        out.append((1.0 - alpha) * v0 + alpha * v1)
+    return out
+
+def _evaluate_calibrated_bf_series(target_datetimes: List[datetime], bf_points: List[Tuple[datetime, float]]) -> List[float]:
+    """Evaluate calibrated body fat series at target datetimes using linear interpolation."""
+    if not bf_points:
+        return [0.0 for _ in target_datetimes]
+    
+    # Build lists of datetimes and values
+    pts_dt = [dt for dt, _ in bf_points]
+    pts_val = [float(v) for _, v in bf_points]
 
     # For each target time, piecewise linear interpolate; constant after last point
     out: List[float] = []
@@ -722,6 +796,198 @@ def _compute_bodyfat_pct_from_weight(
     return bf_pct
 
 
+def create_bodyfat_plot_from_calibrated(
+    entries,
+    states,
+    dates,
+    calibrated_bf_csv: str,
+    output_path: str = "calibrated_bodyfat_trend.png",
+    no_display: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    ci_multiplier: float = 1.96,
+) -> None:
+    """
+    Create Body Fat % vs Date plot using DEXA-calibrated body fat measurements with Kalman filtering.
+    """
+    if not entries or not states:
+        return
+
+    # Load calibrated body fat data
+    bf_points = _load_calibrated_bf_csv(calibrated_bf_csv)
+    if not bf_points:
+        print(f"Warning: No calibrated body fat data found in {calibrated_bf_csv}")
+        return
+
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_datetime]
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_datetime]
+        
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+
+    # Create body fat entries from calibrated data
+    bf_entries = []
+    for dt, bf_pct in bf_points:
+        # Apply date filtering if specified
+        if start_date or end_date:
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+        
+        # Find corresponding weight for this datetime
+        closest_weight = None
+        min_diff = float('inf')
+        for entry in entries:
+            diff = abs((dt - entry.entry_datetime).total_seconds())
+            if diff < min_diff:
+                min_diff = diff
+                closest_weight = entry.weight
+        
+        if closest_weight is not None:
+            bf_entries.append(WeightEntry(dt, bf_pct))
+
+    if not bf_entries:
+        print("Warning: No matching weight data found for body fat measurements")
+        return
+
+    # For calibrated data, use direct interpolation instead of Kalman filtering
+    # since the data is already calibrated and smoothed from DEXA calibration
+    from scipy.interpolate import interp1d
+    import numpy as np
+    
+    # Create dense time grid
+    start_dt = min(e.entry_datetime for e in bf_entries)
+    end_dt = max(e.entry_datetime for e in bf_entries)
+    total_days = (end_dt - start_dt).total_seconds() / 86400.0
+    num_points = min(5000, max(100, int(total_days * 2)))
+    dense_datetimes = [start_dt + timedelta(days=i * total_days / (num_points - 1)) for i in range(num_points)]
+    
+    # Interpolate body fat percentages
+    bf_times = [(e.entry_datetime - start_dt).total_seconds() / 86400.0 for e in bf_entries]
+    bf_values = [e.weight for e in bf_entries]  # e.weight contains the body fat percentage
+    dense_times = [(dt - start_dt).total_seconds() / 86400.0 for dt in dense_datetimes]
+    
+    # Use linear interpolation
+    interp_func = interp1d(bf_times, bf_values, kind='linear', bounds_error=False, fill_value='extrapolate')
+    dense_means = interp_func(dense_times).tolist()
+    
+    # Estimate uncertainty as a small fraction of the data range
+    data_range = max(bf_values) - min(bf_values)
+    dense_stds = [data_range * 0.05] * len(dense_means)  # 5% of data range as uncertainty
+    
+    if not dense_datetimes:
+        return
+    
+    # Filter dense curves by date range if specified
+    if start_date or end_date:
+        filtered_dense_datetimes = []
+        filtered_dense_means = []
+        filtered_dense_stds = []
+        for dt, mean, std in zip(dense_datetimes, dense_means, dense_stds):
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+            filtered_dense_datetimes.append(dt)
+            filtered_dense_means.append(mean)
+            filtered_dense_stds.append(std)
+        dense_datetimes = filtered_dense_datetimes
+        dense_means = filtered_dense_means
+        dense_stds = filtered_dense_stds
+
+    # Calculate confidence bands
+    bf_band_lower = [max(0.0, m - ci_multiplier * s) for m, s in zip(dense_means, dense_stds)]
+    bf_band_upper = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
+
+    # Entry points: use actual measurements
+    entry_datetimes = [e.entry_datetime for e in bf_entries]
+    entry_bf = [e.weight for e in bf_entries]  # e.weight contains the body fat percentage
+
+    # Plot
+    import matplotlib
+    if no_display:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 8), dpi=100)
+
+    # Confidence band around midline
+    plt.fill_between(
+        dense_datetimes, bf_band_lower, bf_band_upper,
+        color="#cccccc", alpha=0.4, label=f"Body Fat {ci_multiplier:.1f}σ CI"
+    )
+
+    # Interpolated body fat curve
+    plt.plot(dense_datetimes, dense_means, "-", color="#1f77b4", linewidth=2.4,
+             label="DEXA-Calibrated Body Fat %")
+
+    # Scatter actual points
+    if entry_bf and len(entry_datetimes) == len(entry_bf):
+        plt.scatter(entry_datetimes, entry_bf, s=36, color="#1f77b4", alpha=0.8,
+                    edgecolors="white", linewidths=0.5, zorder=5, label="Calibrated measurements")
+
+    # Stats panel
+    latest_date = dense_datetimes[-1].date()
+    current_bf = float(dense_means[-1])
+    current_halfwidth = float(max(bf_band_upper[-1] - current_bf, current_bf - bf_band_lower[-1]))
+
+    # Current rate (bf% per week) from derivative of a spline
+    try:
+        from scipy.interpolate import CubicSpline
+        t0_dt = dense_datetimes[0]
+        t_days = np.array([(dt - t0_dt).total_seconds() / 86400.0 for dt in dense_datetimes], dtype=float)
+        bf_arr = np.array(dense_means, dtype=float)
+        bf_spline = CubicSpline(t_days, bf_arr, bc_type="natural")
+        bf_slope_per_day = float(bf_spline.derivative()(t_days[-1]))
+    except Exception:
+        # Fallback: finite difference over last two points
+        t0_dt = dense_datetimes[0]
+        t_days = np.array([(dt - t0_dt).total_seconds() / 86400.0 for dt in dense_datetimes], dtype=float)
+        if len(t_days) >= 2:
+            dt_last = float(t_days[-1] - t_days[-2]) if t_days[-1] != t_days[-2] else 1.0
+            bf_slope_per_day = float((dense_means[-1] - dense_means[-2]) / dt_last)
+        else:
+            bf_slope_per_day = 0.0
+    bf_slope_per_week = 7.0 * bf_slope_per_day
+
+    # Stats box text
+    stats_text = (
+        f"Current Estimate ({latest_date})\n"
+        f"Body Fat: {current_bf:.2f}% ± {current_halfwidth:.2f}%\n"
+        f"Rate: {bf_slope_per_week:+.3f}%/week\n\n"
+        f"Data: DEXA-calibrated BIA measurements\n"
+        f"Method: Kalman filter on body fat %"
+    )
+
+    ax = plt.gca()
+    ax.text(0.02, 0.02, stats_text, transform=ax.transAxes,
+            ha='left', va='bottom', fontsize=10,
+            bbox=dict(boxstyle='round', facecolor='white',
+                     alpha=0.9, edgecolor='#cccccc'), zorder=10)
+
+    plt.title("DEXA-Calibrated Body Fat %")
+    plt.xlabel("Date")
+    plt.ylabel("Body Fat (%)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    if no_display:
+        plt.close()
+    else:
+        plt.show()
+
 def create_bodyfat_plot_from_kalman(
     entries,
     states,
@@ -732,7 +998,7 @@ def create_bodyfat_plot_from_kalman(
     no_display: bool = False,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    lbm_csv: Optional[str] = None,
+    fat_mass_csv: Optional[str] = None,
     ci_multiplier: float = 1.96,
 ) -> None:
     """
@@ -787,16 +1053,16 @@ def create_bodyfat_plot_from_kalman(
     if baseline_weight_lb is None:
         baseline_weight_lb = float(dense_means[0])
 
-    # If an LBM CSV is provided, drive body fat computations directly from LBM
-    if lbm_csv:
-        lbm_points = _load_lbm_csv(lbm_csv)
-        if not lbm_points:
-            # Fall back to original model if LBM file empty/unreadable
-            lbm_csv = None
+    # If a fat mass CSV is provided, drive body fat computations directly from fat mass
+    if fat_mass_csv:
+        fat_mass_points = _load_fat_mass_csv(fat_mass_csv)
+        if not fat_mass_points:
+            # Fall back to original model if fat mass file empty/unreadable
+            fat_mass_csv = None
 
-    if lbm_csv:
+    if fat_mass_csv:
         # Build LBM series at dense times and entry times
-        dense_lbm = _evaluate_lbm_series(dense_datetimes, lbm_points)
+        dense_lbm = _evaluate_lbm_series(dense_datetimes, fat_mass_points)
         # Body fat midline using provided LBM
         bf_mid = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, w))))))
                   for w, l in zip(dense_means, dense_lbm)]
@@ -814,7 +1080,7 @@ def create_bodyfat_plot_from_kalman(
         # Entry points BF from entries and interpolated LBM
         entry_datetimes = [e.entry_datetime for e in filtered_entries]
         entry_weights = [float(e.weight) for e in filtered_entries]
-        entry_lbm = _evaluate_lbm_series(entry_datetimes, lbm_points)
+        entry_lbm = _evaluate_lbm_series(entry_datetimes, fat_mass_points)
         entry_bf_mid = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, w))))))
                         for w, l in zip(entry_weights, entry_lbm)]
         show_scenarios = False
@@ -923,9 +1189,9 @@ def create_bodyfat_plot_from_kalman(
     current_weight = float(dense_means[-1])
     weight_perturbation = weight_velocity_ci * 7.0  # 1 week worth of velocity uncertainty
     
-    if lbm_csv:
+    if fat_mass_csv:
         # For LBM-based calculation, uncertainty comes from weight uncertainty
-        current_lbm = _evaluate_lbm_series([dense_datetimes[-1]], lbm_points)[0]
+        current_lbm = _evaluate_lbm_series([dense_datetimes[-1]], fat_mass_points)[0]
         bf_current = float(max(0.0, min(100.0, 100.0 * (1.0 - (current_lbm / max(1e-6, current_weight))))))
         bf_pert_lo = float(max(0.0, min(100.0, 100.0 * (1.0 - (current_lbm / max(1e-6, current_weight - weight_perturbation))))))
         bf_pert_hi = float(max(0.0, min(100.0, 100.0 * (1.0 - (current_lbm / max(1e-6, current_weight + weight_perturbation))))))
@@ -956,8 +1222,8 @@ def create_bodyfat_plot_from_kalman(
     # Helper to compute BF at a future offset
     def _bf_from_weight_at_offset(days_fwd: float, w: float, w_std: float) -> Tuple[float, float]:
         future_dt = dense_datetimes[-1] + timedelta(days=days_fwd)
-        if lbm_csv:
-            future_lbm = _evaluate_lbm_series([future_dt], lbm_points)[0]
+        if fat_mass_csv:
+            future_lbm = _evaluate_lbm_series([future_dt], fat_mass_points)[0]
             bf_mid_val = float(max(0.0, min(100.0, 100.0 * (1.0 - (future_lbm / max(1e-6, w))))))
             w_lo_f = max(1e-6, w - ci_multiplier * w_std)
             w_hi_f = w + ci_multiplier * w_std
@@ -1192,6 +1458,207 @@ def create_bmi_plot_from_kalman(
     plt.close()
 
 
+def create_ffmi_plot_from_calibrated(
+    entries,
+    states,
+    dates,
+    calibrated_bf_csv: str,
+    height_file: str = "data/height.txt",
+    output_path: str = "calibrated_ffmi_trend.png",
+    no_display: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    ci_multiplier: float = 1.96,
+) -> None:
+    """
+    Create FFMI vs Date plot using DEXA-calibrated body fat measurements with Kalman filtering.
+    """
+    if not entries or not states:
+        return
+
+    # Load calibrated body fat data
+    bf_points = _load_calibrated_bf_csv(calibrated_bf_csv)
+    if not bf_points:
+        print(f"Warning: No calibrated body fat data found in {calibrated_bf_csv}")
+        return
+
+    # Load height data
+    height_inches = _load_height_data(height_file)
+    if height_inches <= 0:
+        print(f"Warning: Invalid height data from {height_file}")
+        return
+
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_datetime]
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_datetime]
+        
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+
+    # Create FFMI entries from calibrated data
+    ffmi_entries = []
+    height_m = height_inches * 0.0254
+    for dt, bf_pct in bf_points:
+        # Apply date filtering if specified
+        if start_date or end_date:
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+        
+        # Find corresponding weight for this datetime
+        closest_weight = None
+        min_diff = float('inf')
+        for entry in entries:
+            diff = abs((dt - entry.entry_datetime).total_seconds())
+            if diff < min_diff:
+                min_diff = diff
+                closest_weight = entry.weight
+        
+        if closest_weight is not None:
+            lbm = closest_weight * (1.0 - bf_pct / 100.0)
+            ffmi = (lbm * 0.453592) / (height_m ** 2)
+            ffmi_entries.append(WeightEntry(dt, ffmi))
+
+    if not ffmi_entries:
+        print("Warning: No matching weight data found for body fat measurements")
+        return
+
+    # For calibrated data, use direct interpolation instead of Kalman filtering
+    from scipy.interpolate import interp1d
+    import numpy as np
+    
+    # Create dense time grid
+    start_dt = min(e.entry_datetime for e in ffmi_entries)
+    end_dt = max(e.entry_datetime for e in ffmi_entries)
+    total_days = (end_dt - start_dt).total_seconds() / 86400.0
+    num_points = min(5000, max(100, int(total_days * 2)))
+    dense_datetimes = [start_dt + timedelta(days=i * total_days / (num_points - 1)) for i in range(num_points)]
+    
+    # Interpolate FFMI values
+    ffmi_times = [(e.entry_datetime - start_dt).total_seconds() / 86400.0 for e in ffmi_entries]
+    ffmi_values = [e.weight for e in ffmi_entries]  # e.weight contains the FFMI
+    dense_times = [(dt - start_dt).total_seconds() / 86400.0 for dt in dense_datetimes]
+    
+    # Use linear interpolation
+    interp_func = interp1d(ffmi_times, ffmi_values, kind='linear', bounds_error=False, fill_value='extrapolate')
+    dense_means = interp_func(dense_times).tolist()
+    
+    # Estimate uncertainty as a small fraction of the data range
+    data_range = max(ffmi_values) - min(ffmi_values)
+    dense_stds = [data_range * 0.05] * len(dense_means)  # 5% of data range as uncertainty
+    if not dense_datetimes:
+        return
+    
+    # Filter dense curves by date range if specified
+    if start_date or end_date:
+        filtered_dense_datetimes = []
+        filtered_dense_means = []
+        filtered_dense_stds = []
+        for dt, mean, std in zip(dense_datetimes, dense_means, dense_stds):
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+            filtered_dense_datetimes.append(dt)
+            filtered_dense_means.append(mean)
+            filtered_dense_stds.append(std)
+        dense_datetimes = filtered_dense_datetimes
+        dense_means = filtered_dense_means
+        dense_stds = filtered_dense_stds
+
+    # Calculate confidence bands
+    ffmi_band_lower = [max(0.0, m - ci_multiplier * s) for m, s in zip(dense_means, dense_stds)]
+    ffmi_band_upper = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
+
+    # Entry points: use actual measurements
+    entry_datetimes = [e.entry_datetime for e in ffmi_entries]
+    entry_ffmi = [e.weight for e in ffmi_entries]
+
+    # Plot
+    import matplotlib
+    if no_display:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 8), dpi=100)
+
+    # Confidence band around midline
+    plt.fill_between(
+        dense_datetimes, ffmi_band_lower, ffmi_band_upper,
+        color="#cccccc", alpha=0.4, label=f"FFMI {ci_multiplier:.1f}σ CI"
+    )
+
+    # Kalman-filtered FFMI curve
+    plt.plot(dense_datetimes, dense_means, "-", color="#ff7f0e", linewidth=2.4,
+             label="DEXA-Calibrated FFMI (Kalman)")
+
+    # Scatter actual points
+    if entry_ffmi and len(entry_datetimes) == len(entry_ffmi):
+        plt.scatter(entry_datetimes, entry_ffmi, s=36, color="#ff7f0e", alpha=0.8,
+                    edgecolors="white", linewidths=0.5, zorder=5, label="Calibrated measurements")
+
+    # Stats panel
+    latest_date = dense_datetimes[-1].date()
+    current_ffmi = float(dense_means[-1])
+    current_halfwidth = float(max(ffmi_band_upper[-1] - current_ffmi, current_ffmi - ffmi_band_lower[-1]))
+
+    # Current rate (FFMI per week) from derivative of a spline
+    try:
+        from scipy.interpolate import CubicSpline
+        t0_dt = dense_datetimes[0]
+        t_days = np.array([(dt - t0_dt).total_seconds() / 86400.0 for dt in dense_datetimes], dtype=float)
+        ffmi_arr = np.array(dense_means, dtype=float)
+        ffmi_spline = CubicSpline(t_days, ffmi_arr, bc_type="natural")
+        ffmi_slope_per_day = float(ffmi_spline.derivative()(t_days[-1]))
+    except Exception:
+        # Fallback: finite difference over last two points
+        t0_dt = dense_datetimes[0]
+        t_days = np.array([(dt - t0_dt).total_seconds() / 86400.0 for dt in dense_datetimes], dtype=float)
+        if len(t_days) >= 2:
+            dt_last = float(t_days[-1] - t_days[-2]) if t_days[-1] != t_days[-2] else 1.0
+            ffmi_slope_per_day = float((dense_means[-1] - dense_means[-2]) / dt_last)
+        else:
+            ffmi_slope_per_day = 0.0
+    ffmi_slope_per_week = 7.0 * ffmi_slope_per_day
+
+    # Stats box text
+    stats_text = (
+        f"Current Estimate ({latest_date})\n"
+        f"FFMI: {current_ffmi:.2f} ± {current_halfwidth:.2f}\n"
+        f"Rate: {ffmi_slope_per_week:+.3f}/week\n\n"
+        f"Data: DEXA-calibrated BIA measurements\n"
+        f"Method: Kalman filter on FFMI"
+    )
+
+    ax = plt.gca()
+    ax.text(0.02, 0.02, stats_text, transform=ax.transAxes,
+            ha='left', va='bottom', fontsize=10,
+            bbox=dict(boxstyle='round', facecolor='white',
+                     alpha=0.9, edgecolor='#cccccc'), zorder=10)
+
+    plt.title("DEXA-Calibrated Fat-Free Mass Index")
+    plt.xlabel("Date")
+    plt.ylabel("FFMI")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    if no_display:
+        plt.close()
+    else:
+        plt.show()
+
+
 def create_ffmi_plot_from_kalman(
     entries,
     states,
@@ -1201,7 +1668,7 @@ def create_ffmi_plot_from_kalman(
     no_display: bool = False,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    lbm_csv: Optional[str] = None,
+    fat_mass_csv: Optional[str] = None,
     ci_multiplier: float = 1.96,
 ) -> None:
     """
@@ -1259,17 +1726,17 @@ def create_ffmi_plot_from_kalman(
     
     # Calculate LBM from Kalman-smoothed weights
     # Use the same LBM calculation logic as body fat plot
-    if lbm_csv:
-        lbm_points = _load_lbm_csv(lbm_csv)
-        if not lbm_points:
+    if fat_mass_csv:
+        fat_mass_points = _load_fat_mass_csv(fat_mass_csv)
+        if not fat_mass_points:
             # Fall back to estimated LBM if LBM file empty/unreadable
-            lbm_points = None
+            fat_mass_points = None
     else:
-        lbm_points = None
+        fat_mass_points = None
     
-    if lbm_points:
+    if fat_mass_points:
         # Use provided LBM data
-        dense_lbm = _evaluate_lbm_series(dense_datetimes, lbm_points)
+        dense_lbm = _evaluate_lbm_series(dense_datetimes, fat_mass_points)
         # Calculate FFMI from LBM
         ffmi_means = [(lbm * 0.453592) / (height_m ** 2) for lbm in dense_lbm]
         
@@ -1286,7 +1753,7 @@ def create_ffmi_plot_from_kalman(
         # Calculate FFMI for actual measurements
         entry_datetimes = [e.entry_datetime for e in filtered_entries]
         entry_weights = [float(e.weight) for e in filtered_entries]
-        entry_lbm = _evaluate_lbm_series(entry_datetimes, lbm_points)
+        entry_lbm = _evaluate_lbm_series(entry_datetimes, fat_mass_points)
         entry_ffmi = [(lbm * 0.453592) / (height_m ** 2) for lbm in entry_lbm]
     else:
         # Estimate LBM from weight using a simple model (assuming ~15% body fat)
@@ -1355,6 +1822,638 @@ def create_ffmi_plot_from_kalman(
         plt.show()
     plt.close()
 
+
+def create_lbm_plot_from_calibrated(
+    entries,
+    states,
+    dates,
+    calibrated_bf_csv: str,
+    output_path: str = "calibrated_lbm_trend.png",
+    no_display: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    ci_multiplier: float = 1.96,
+) -> None:
+    """
+    Create LBM (lb) vs Date plot using DEXA-calibrated body fat measurements with Kalman filtering.
+    """
+    if not entries or not states:
+        return
+
+    # Load calibrated body fat data
+    bf_points = _load_calibrated_bf_csv(calibrated_bf_csv)
+    if not bf_points:
+        print(f"Warning: No calibrated body fat data found in {calibrated_bf_csv}")
+        return
+
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_datetime]
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_datetime]
+        
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+
+    # Create LBM entries from calibrated data
+    lbm_entries = []
+    for dt, bf_pct in bf_points:
+        # Apply date filtering if specified
+        if start_date or end_date:
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+        
+        # Find corresponding weight for this datetime
+        closest_weight = None
+        min_diff = float('inf')
+        for entry in entries:
+            diff = abs((dt - entry.entry_datetime).total_seconds())
+            if diff < min_diff:
+                min_diff = diff
+                closest_weight = entry.weight
+        
+        if closest_weight is not None:
+            lbm = closest_weight * (1.0 - bf_pct / 100.0)
+            lbm_entries.append(WeightEntry(dt, lbm))
+
+    if not lbm_entries:
+        print("Warning: No matching weight data found for body fat measurements")
+        return
+
+    # For calibrated data, use direct interpolation instead of Kalman filtering
+    from scipy.interpolate import interp1d
+    import numpy as np
+    
+    # Create dense time grid
+    start_dt = min(e.entry_datetime for e in lbm_entries)
+    end_dt = max(e.entry_datetime for e in lbm_entries)
+    total_days = (end_dt - start_dt).total_seconds() / 86400.0
+    num_points = min(5000, max(100, int(total_days * 2)))
+    dense_datetimes = [start_dt + timedelta(days=i * total_days / (num_points - 1)) for i in range(num_points)]
+    
+    # Interpolate LBM values
+    lbm_times = [(e.entry_datetime - start_dt).total_seconds() / 86400.0 for e in lbm_entries]
+    lbm_values = [e.weight for e in lbm_entries]  # e.weight contains the LBM
+    dense_times = [(dt - start_dt).total_seconds() / 86400.0 for dt in dense_datetimes]
+    
+    # Use linear interpolation
+    interp_func = interp1d(lbm_times, lbm_values, kind='linear', bounds_error=False, fill_value='extrapolate')
+    dense_means = interp_func(dense_times).tolist()
+    
+    # Estimate uncertainty as a small fraction of the data range
+    data_range = max(lbm_values) - min(lbm_values)
+    dense_stds = [data_range * 0.05] * len(dense_means)  # 5% of data range as uncertainty
+    if not dense_datetimes:
+        return
+    
+    # Filter dense curves by date range if specified
+    if start_date or end_date:
+        filtered_dense_datetimes = []
+        filtered_dense_means = []
+        filtered_dense_stds = []
+        for dt, mean, std in zip(dense_datetimes, dense_means, dense_stds):
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+            filtered_dense_datetimes.append(dt)
+            filtered_dense_means.append(mean)
+            filtered_dense_stds.append(std)
+        dense_datetimes = filtered_dense_datetimes
+        dense_means = filtered_dense_means
+        dense_stds = filtered_dense_stds
+
+    # Calculate confidence bands
+    lbm_band_lower = [max(0.0, m - ci_multiplier * s) for m, s in zip(dense_means, dense_stds)]
+    lbm_band_upper = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
+
+    # Entry points: use actual measurements
+    entry_datetimes = [e.entry_datetime for e in lbm_entries]
+    entry_lbm = [e.weight for e in lbm_entries]
+
+    # Plot
+    import matplotlib
+    if no_display:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 8), dpi=100)
+
+    # Confidence band around midline
+    plt.fill_between(
+        dense_datetimes, lbm_band_lower, lbm_band_upper,
+        color="#cccccc", alpha=0.4, label=f"LBM {ci_multiplier:.1f}σ CI"
+    )
+
+    # Kalman-filtered LBM curve
+    plt.plot(dense_datetimes, dense_means, "-", color="#2ca02c", linewidth=2.4,
+             label="DEXA-Calibrated LBM (Kalman)")
+
+    # Scatter actual points
+    if entry_lbm and len(entry_datetimes) == len(entry_lbm):
+        plt.scatter(entry_datetimes, entry_lbm, s=36, color="#2ca02c", alpha=0.8,
+                    edgecolors="white", linewidths=0.5, zorder=5, label="Calibrated measurements")
+
+    # Stats panel
+    latest_date = dense_datetimes[-1].date()
+    current_lbm = float(dense_means[-1])
+    current_halfwidth = float(max(lbm_band_upper[-1] - current_lbm, current_lbm - lbm_band_lower[-1]))
+
+    # Current rate (LBM per week) from derivative of a spline
+    try:
+        from scipy.interpolate import CubicSpline
+        t0_dt = dense_datetimes[0]
+        t_days = np.array([(dt - t0_dt).total_seconds() / 86400.0 for dt in dense_datetimes], dtype=float)
+        lbm_arr = np.array(dense_means, dtype=float)
+        lbm_spline = CubicSpline(t_days, lbm_arr, bc_type="natural")
+        lbm_slope_per_day = float(lbm_spline.derivative()(t_days[-1]))
+    except Exception:
+        # Fallback: finite difference over last two points
+        t0_dt = dense_datetimes[0]
+        t_days = np.array([(dt - t0_dt).total_seconds() / 86400.0 for dt in dense_datetimes], dtype=float)
+        if len(t_days) >= 2:
+            dt_last = float(t_days[-1] - t_days[-2]) if t_days[-1] != t_days[-2] else 1.0
+            lbm_slope_per_day = float((dense_means[-1] - dense_means[-2]) / dt_last)
+        else:
+            lbm_slope_per_day = 0.0
+    lbm_slope_per_week = 7.0 * lbm_slope_per_day
+
+    # Stats box text
+    stats_text = (
+        f"Current Estimate ({latest_date})\n"
+        f"LBM: {current_lbm:.2f} ± {current_halfwidth:.2f} lb\n"
+        f"Rate: {lbm_slope_per_week:+.3f} lb/week\n\n"
+        f"Data: DEXA-calibrated BIA measurements\n"
+        f"Method: Kalman filter on LBM"
+    )
+
+    ax = plt.gca()
+    ax.text(0.02, 0.02, stats_text, transform=ax.transAxes,
+            ha='left', va='bottom', fontsize=10,
+            bbox=dict(boxstyle='round', facecolor='white',
+                     alpha=0.9, edgecolor='#cccccc'), zorder=10)
+
+    plt.title("DEXA-Calibrated Lean Body Mass")
+    plt.xlabel("Date")
+    plt.ylabel("LBM (lb)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    if no_display:
+        plt.close()
+    else:
+        plt.show()
+
+
+def create_lbm_plot_from_kalman(
+    entries,
+    states,
+    dates,
+    baseline_weight_lb: Optional[float],
+    baseline_lean_lb: float,
+    output_path: str = "lbm_trend.png",
+    no_display: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    fat_mass_csv: Optional[str] = None,
+    ci_multiplier: float = 1.96,
+) -> None:
+    """
+    Plot Lean Body Mass (LBM) over time.
+
+    - If an LBM CSV is provided, use it for scatter points; the smoothed LBM curve
+      is derived from Kalman-smoothed weight using the mid scenario (s=0.10) model:
+        L(t) = L0 + s * (W(t) - W0)
+    - Confidence band is computed from W ± z*std propagated through the model.
+    """
+    if not entries or not states:
+        return
+
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            # Convert start_date to datetime at beginning of day
+            start_dt = datetime.combine(start_date, datetime.min.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_dt]
+        if end_date:
+            end_dt = datetime.combine(end_date, datetime.max.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_dt]
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+
+    # Smoothed mean/std over dense grid
+    dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(states, dates)
+    if not dense_datetimes:
+        return
+
+    # Filter dense series by date range
+    if start_date or end_date:
+        f_dt, f_mean, f_std = [], [], []
+        for dt, m, s in zip(dense_datetimes, dense_means, dense_stds):
+            d = dt.date()
+            if start_date and d < start_date:
+                continue
+            if end_date and d > end_date:
+                continue
+            f_dt.append(dt)
+            f_mean.append(m)
+            f_std.append(s)
+        dense_datetimes, dense_means, dense_stds = f_dt, f_mean, f_std
+
+    # Baseline defaults
+    if baseline_weight_lb is None:
+        baseline_weight_lb = float(dense_means[0])
+    W0 = float(baseline_weight_lb)
+    L0 = float(baseline_lean_lb)
+    s_mid = 0.10
+
+    # Smoothed LBM curve and confidence band via propagation
+    dense_lbm = [max(0.0, min(float(L0 + s_mid * (w - W0)), float(w))) for w in dense_means]
+    w_lo = [max(1e-6, m - ci_multiplier * st) for m, st in zip(dense_means, dense_stds)]
+    w_hi = [m + ci_multiplier * st for m, st in zip(dense_means, dense_stds)]
+    lbm_lo = [max(0.0, min(float(L0 + s_mid * (wl - W0)), float(wl))) for wl in w_lo]
+    lbm_hi = [max(0.0, min(float(L0 + s_mid * (wh - W0)), float(wh))) for wh in w_hi]
+    band_lower = [min(a, b) for a, b in zip(lbm_lo, lbm_hi)]
+    band_upper = [max(a, b) for a, b in zip(lbm_lo, lbm_hi)]
+
+    # Scatter points
+    entry_datetimes = [e.entry_datetime for e in filtered_entries]
+    if fat_mass_csv:
+        fat_mass_points = _load_fat_mass_csv(fat_mass_csv)
+        if fat_mass_points:
+            entry_lbm = _evaluate_lbm_series(entry_datetimes, fat_mass_points)
+        else:
+            entry_lbm = [max(0.0, min(float(L0 + s_mid * (w - W0)), float(w))) for w in [e.weight for e in filtered_entries]]
+    else:
+        entry_lbm = [max(0.0, min(float(L0 + s_mid * (w - W0)), float(w))) for w in [e.weight for e in filtered_entries]]
+
+    # Plot
+    import matplotlib
+    if no_display:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 8), dpi=100)
+    plt.fill_between(dense_datetimes, band_lower, band_upper, color="#cccccc", alpha=0.4,
+                     label=f"LBM {ci_multiplier:.1f}σ CI")
+    plt.plot(dense_datetimes, dense_lbm, "-", color="#1f77b4", linewidth=2.4, label="LBM (estimated)")
+    plt.scatter(entry_datetimes, entry_lbm, s=36, color="#1f77b4", alpha=0.8,
+                edgecolors="white", linewidths=0.5, zorder=5, label="LBM (measurements)")
+
+    # Stats box at lower-left
+    latest_lbm = float(dense_lbm[-1])
+    halfwidth = float(max(band_upper[-1] - latest_lbm, latest_lbm - band_lower[-1]))
+    ax = plt.gca()
+    ax.text(0.02, 0.02, f"Current LBM: {latest_lbm:.2f} ± {halfwidth:.2f} lb",
+            transform=ax.transAxes, ha="left", va="bottom", fontsize=10,
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.9, edgecolor="#cccccc"), zorder=10)
+
+    plt.title("Lean Body Mass (LBM)")
+    plt.xlabel("Date")
+    plt.ylabel("LBM (lb)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    if not no_display:
+        plt.show()
+    plt.close()
+
+
+def create_fatmass_plot_from_calibrated(
+    entries,
+    states,
+    dates,
+    calibrated_bf_csv: str,
+    output_path: str = "calibrated_fatmass_trend.png",
+    no_display: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    ci_multiplier: float = 1.96,
+) -> None:
+    """
+    Create Fat Mass (lb) vs Date plot using DEXA-calibrated body fat measurements with Kalman filtering.
+    """
+    if not entries or not states:
+        return
+
+    # Load calibrated body fat data
+    bf_points = _load_calibrated_bf_csv(calibrated_bf_csv)
+    if not bf_points:
+        print(f"Warning: No calibrated body fat data found in {calibrated_bf_csv}")
+        return
+
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_datetime]
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_datetime]
+        
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+
+    # Create fat mass entries from calibrated data
+    fat_mass_entries = []
+    for dt, bf_pct in bf_points:
+        # Apply date filtering if specified
+        if start_date or end_date:
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+        
+        # Find corresponding weight for this datetime
+        closest_weight = None
+        min_diff = float('inf')
+        for entry in entries:
+            diff = abs((dt - entry.entry_datetime).total_seconds())
+            if diff < min_diff:
+                min_diff = diff
+                closest_weight = entry.weight
+        
+        if closest_weight is not None:
+            fat_mass = closest_weight * bf_pct / 100.0
+            fat_mass_entries.append(WeightEntry(dt, fat_mass))
+
+    if not fat_mass_entries:
+        print("Warning: No matching weight data found for body fat measurements")
+        return
+
+    # For calibrated data, use direct interpolation instead of Kalman filtering
+    from scipy.interpolate import interp1d
+    import numpy as np
+    
+    # Create dense time grid
+    start_dt = min(e.entry_datetime for e in fat_mass_entries)
+    end_dt = max(e.entry_datetime for e in fat_mass_entries)
+    total_days = (end_dt - start_dt).total_seconds() / 86400.0
+    num_points = min(5000, max(100, int(total_days * 2)))
+    dense_datetimes = [start_dt + timedelta(days=i * total_days / (num_points - 1)) for i in range(num_points)]
+    
+    # Interpolate fat mass values
+    fm_times = [(e.entry_datetime - start_dt).total_seconds() / 86400.0 for e in fat_mass_entries]
+    fm_values = [e.weight for e in fat_mass_entries]  # e.weight contains the fat mass
+    dense_times = [(dt - start_dt).total_seconds() / 86400.0 for dt in dense_datetimes]
+    
+    # Use linear interpolation
+    interp_func = interp1d(fm_times, fm_values, kind='linear', bounds_error=False, fill_value='extrapolate')
+    dense_means = interp_func(dense_times).tolist()
+    
+    # Estimate uncertainty as a small fraction of the data range
+    data_range = max(fm_values) - min(fm_values)
+    dense_stds = [data_range * 0.05] * len(dense_means)  # 5% of data range as uncertainty
+    if not dense_datetimes:
+        return
+    
+    # Filter dense curves by date range if specified
+    if start_date or end_date:
+        filtered_dense_datetimes = []
+        filtered_dense_means = []
+        filtered_dense_stds = []
+        for dt, mean, std in zip(dense_datetimes, dense_means, dense_stds):
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+            filtered_dense_datetimes.append(dt)
+            filtered_dense_means.append(mean)
+            filtered_dense_stds.append(std)
+        dense_datetimes = filtered_dense_datetimes
+        dense_means = filtered_dense_means
+        dense_stds = filtered_dense_stds
+
+    # Calculate confidence bands
+    fm_band_lower = [max(0.0, m - ci_multiplier * s) for m, s in zip(dense_means, dense_stds)]
+    fm_band_upper = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
+
+    # Entry points: use actual measurements
+    entry_datetimes = [e.entry_datetime for e in fat_mass_entries]
+    entry_fm = [e.weight for e in fat_mass_entries]
+
+    # Plot
+    import matplotlib
+    if no_display:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 8), dpi=100)
+
+    # Confidence band around midline
+    plt.fill_between(
+        dense_datetimes, fm_band_lower, fm_band_upper,
+        color="#cccccc", alpha=0.4, label=f"Fat Mass {ci_multiplier:.1f}σ CI"
+    )
+
+    # Kalman-filtered fat mass curve
+    plt.plot(dense_datetimes, dense_means, "-", color="#d62728", linewidth=2.4,
+             label="DEXA-Calibrated Fat Mass (Kalman)")
+
+    # Scatter actual points
+    if entry_fm and len(entry_datetimes) == len(entry_fm):
+        plt.scatter(entry_datetimes, entry_fm, s=36, color="#d62728", alpha=0.8,
+                    edgecolors="white", linewidths=0.5, zorder=5, label="Calibrated measurements")
+
+    # Stats panel
+    latest_date = dense_datetimes[-1].date()
+    current_fm = float(dense_means[-1])
+    current_halfwidth = float(max(fm_band_upper[-1] - current_fm, current_fm - fm_band_lower[-1]))
+
+    # Current rate (fat mass per week) from derivative of a spline
+    try:
+        from scipy.interpolate import CubicSpline
+        t0_dt = dense_datetimes[0]
+        t_days = np.array([(dt - t0_dt).total_seconds() / 86400.0 for dt in dense_datetimes], dtype=float)
+        fm_arr = np.array(dense_means, dtype=float)
+        fm_spline = CubicSpline(t_days, fm_arr, bc_type="natural")
+        fm_slope_per_day = float(fm_spline.derivative()(t_days[-1]))
+    except Exception:
+        # Fallback: finite difference over last two points
+        t0_dt = dense_datetimes[0]
+        t_days = np.array([(dt - t0_dt).total_seconds() / 86400.0 for dt in dense_datetimes], dtype=float)
+        if len(t_days) >= 2:
+            dt_last = float(t_days[-1] - t_days[-2]) if t_days[-1] != t_days[-2] else 1.0
+            fm_slope_per_day = float((dense_means[-1] - dense_means[-2]) / dt_last)
+        else:
+            fm_slope_per_day = 0.0
+    fm_slope_per_week = 7.0 * fm_slope_per_day
+
+    # Stats box text
+    stats_text = (
+        f"Current Estimate ({latest_date})\n"
+        f"Fat Mass: {current_fm:.2f} ± {current_halfwidth:.2f} lb\n"
+        f"Rate: {fm_slope_per_week:+.3f} lb/week\n\n"
+        f"Data: DEXA-calibrated BIA measurements\n"
+        f"Method: Kalman filter on fat mass"
+    )
+
+    ax = plt.gca()
+    ax.text(0.02, 0.02, stats_text, transform=ax.transAxes,
+            ha='left', va='bottom', fontsize=10,
+            bbox=dict(boxstyle='round', facecolor='white',
+                     alpha=0.9, edgecolor='#cccccc'), zorder=10)
+
+    plt.title("DEXA-Calibrated Fat Mass")
+    plt.xlabel("Date")
+    plt.ylabel("Fat Mass (lb)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    if no_display:
+        plt.close()
+    else:
+        plt.show()
+
+
+def create_fatmass_plot_from_kalman(
+    entries,
+    states,
+    dates,
+    baseline_weight_lb: Optional[float],
+    baseline_lean_lb: float,
+    output_path: str = "fatmass_trend.png",
+    no_display: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    fat_mass_csv: Optional[str] = None,
+    ci_multiplier: float = 1.96,
+) -> None:
+    """
+    Plot Fat Mass (lb) over time: F = W - LBM.
+
+    - If LBM CSV provided, use it for scatter and for computing fat mass band by
+      holding LBM fixed while varying W ± z*std.
+    - Otherwise, derive LBM via mid scenario (s=0.10): L = L0 + s*(W - W0).
+    """
+    if not entries or not states:
+        return
+
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            start_dt = datetime.combine(start_date, datetime.min.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_dt]
+        if end_date:
+            end_dt = datetime.combine(end_date, datetime.max.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_dt]
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+
+    # Smoothed mean/std over dense grid
+    dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(states, dates)
+    if not dense_datetimes:
+        return
+
+    # Filter dense series by date range
+    if start_date or end_date:
+        f_dt, f_mean, f_std = [], [], []
+        for dt, m, s in zip(dense_datetimes, dense_means, dense_stds):
+            d = dt.date()
+            if start_date and d < start_date:
+                continue
+            if end_date and d > end_date:
+                continue
+            f_dt.append(dt)
+            f_mean.append(m)
+            f_std.append(s)
+        dense_datetimes, dense_means, dense_stds = f_dt, f_mean, f_std
+
+    # Baseline defaults
+    if baseline_weight_lb is None:
+        baseline_weight_lb = float(dense_means[0])
+    W0 = float(baseline_weight_lb)
+    L0 = float(baseline_lean_lb)
+    s_mid = 0.10
+
+    # If fat mass CSV is provided and valid, use it to compute fat mass
+    fat_mass_points = None
+    if fat_mass_csv:
+        pts = _load_fat_mass_csv(fat_mass_csv)
+        if pts:
+            fat_mass_points = pts
+
+    if fat_mass_points:
+        dense_lbm = _evaluate_lbm_series(dense_datetimes, fat_mass_points)
+        dense_fat = [max(0.0, float(w - l)) for w, l in zip(dense_means, dense_lbm)]
+        w_lo = [max(1e-6, m - ci_multiplier * st) for m, st in zip(dense_means, dense_stds)]
+        w_hi = [m + ci_multiplier * st for m, st in zip(dense_means, dense_stds)]
+        fat_lo = [max(0.0, float(wl - l)) for wl, l in zip(w_lo, dense_lbm)]
+        fat_hi = [max(0.0, float(wh - l)) for wh, l in zip(w_hi, dense_lbm)]
+    else:
+        # Model-based LBM then fat mass
+        dense_lbm = [max(0.0, min(float(L0 + s_mid * (w - W0)), float(w))) for w in dense_means]
+        dense_fat = [max(0.0, float(w - l)) for w, l in zip(dense_means, dense_lbm)]
+        w_lo = [max(1e-6, m - ci_multiplier * st) for m, st in zip(dense_means, dense_stds)]
+        w_hi = [m + ci_multiplier * st for m, st in zip(dense_means, dense_stds)]
+        lbm_lo = [max(0.0, min(float(L0 + s_mid * (wl - W0)), float(wl))) for wl in w_lo]
+        lbm_hi = [max(0.0, min(float(L0 + s_mid * (wh - W0)), float(wh))) for wh in w_hi]
+        fat_lo = [max(0.0, float(wl - ll)) for wl, ll in zip(w_lo, lbm_lo)]
+        fat_hi = [max(0.0, float(wh - lh)) for wh, lh in zip(w_hi, lbm_hi)]
+
+    band_lower = [min(a, b) for a, b in zip(fat_lo, fat_hi)]
+    band_upper = [max(a, b) for a, b in zip(fat_lo, fat_hi)]
+
+    # Scatter points
+    entry_datetimes = [e.entry_datetime for e in filtered_entries]
+    if fat_mass_points:
+        entry_lbm = _evaluate_lbm_series(entry_datetimes, fat_mass_points)
+        entry_fat = [max(0.0, float(w - l)) for w, l in zip([e.weight for e in filtered_entries], entry_lbm)]
+    else:
+        entry_lbm = [max(0.0, min(float(L0 + s_mid * (w - W0)), float(w))) for w in [e.weight for e in filtered_entries]]
+        entry_fat = [max(0.0, float(w - l)) for w, l in zip([e.weight for e in filtered_entries], entry_lbm)]
+
+    # Plot
+    import matplotlib
+    if no_display:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 8), dpi=100)
+    plt.fill_between(dense_datetimes, band_lower, band_upper, color="#f2b2ae", alpha=0.4,
+                     label=f"Fat mass {ci_multiplier:.1f}σ CI")
+    plt.plot(dense_datetimes, dense_fat, "-", color="#d62728", linewidth=2.4, label="Fat mass (estimated)")
+    plt.scatter(entry_datetimes, entry_fat, s=36, color="#d62728", alpha=0.8,
+                edgecolors="white", linewidths=0.5, zorder=5, label="Fat mass (measurements)")
+
+    # Stats box
+    latest_fat = float(dense_fat[-1])
+    halfwidth = float(max(band_upper[-1] - latest_fat, latest_fat - band_lower[-1]))
+    ax = plt.gca()
+    ax.text(0.02, 0.02, f"Current Fat Mass: {latest_fat:.2f} ± {halfwidth:.2f} lb",
+            transform=ax.transAxes, ha="left", va="bottom", fontsize=10,
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.9, edgecolor="#cccccc"), zorder=10)
+
+    plt.title("Fat Mass (lb)")
+    plt.xlabel("Date")
+    plt.ylabel("Fat mass (lb)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    if not no_display:
+        plt.show()
+    plt.close()
 
 def create_residuals_histogram(residuals: List[float], 
                               output_path: str = "residuals_histogram.png",
