@@ -71,6 +71,8 @@ class WeightTrackerGUI:
         self.var_add_lbm_value = tk.StringVar(value="")
         self.var_add_bf_date = tk.StringVar(value=today_iso)
         self.var_add_bf_value = tk.StringVar(value="")
+        self.var_height_value = tk.StringVar(value="")
+        self.var_height_unit = tk.StringVar(value="inches")
 
         # Layout
         pad = {"padx": 8, "pady": 6}
@@ -169,11 +171,27 @@ class WeightTrackerGUI:
         tk.Button(root, text="Add to LBM CSV", command=self._on_add_bf).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
+        tk.Label(root, text="Height:").grid(row=row, column=0, sticky="e", **pad)
+        height_frame = tk.Frame(root)
+        height_frame.grid(row=row, column=1, sticky="we", **pad)
+        # Configure height_frame columns
+        height_frame.grid_columnconfigure(0, weight=0)  # Height label
+        height_frame.grid_columnconfigure(1, weight=0)  # Height entry
+        height_frame.grid_columnconfigure(2, weight=0)  # Unit selector
+        tk.Label(height_frame, text="Height:", width=12, anchor="e").grid(row=0, column=0, sticky="e", padx=(0, 6))
+        tk.Entry(height_frame, textvariable=self.var_height_value, width=10).grid(row=0, column=1, sticky="w", padx=(0, 6))
+        tk.OptionMenu(height_frame, self.var_height_unit, "inches", "cm").grid(row=0, column=2, sticky="w", padx=(6, 0))
+        tk.Button(root, text="Update Height", command=self._on_update_height).grid(row=row, column=2, sticky="w", **pad)
+
+        row += 1
         self.output = scrolledtext.ScrolledText(root, height=14, width=80, wrap="word")
         self.output.grid(row=row, column=0, columnspan=3, sticky="nsew", padx=8, pady=(0, 8))
         # Make the main content column and the output row expand with the window
         root.grid_columnconfigure(1, weight=1)
         root.grid_rowconfigure(row, weight=1)
+        
+        # Load current height value after GUI is set up
+        self._load_height_value()
 
     def _browse_csv(self) -> None:
         path = filedialog.askopenfilename(title="Select weights CSV", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
@@ -575,6 +593,55 @@ class WeightTrackerGUI:
         
         self._append_output_safe("Converting body fat percentage to LBM...")
         threading.Thread(target=worker, daemon=True).start()
+
+    def _load_height_value(self) -> None:
+        """Load current height value from data/height.txt or set default"""
+        height_file = os.path.join(self.data_dir, "height.txt")
+        
+        try:
+            if os.path.exists(height_file):
+                with open(height_file, 'r') as f:
+                    height_inches = float(f.read().strip())
+                # Display in inches by default
+                self.var_height_value.set(f"{height_inches:.1f}")
+                self.var_height_unit.set("inches")
+            else:
+                # Set default value (67 inches = 170 cm)
+                self.var_height_value.set("67.0")
+                self.var_height_unit.set("inches")
+        except Exception:
+            # If file exists but can't be read, use default
+            self.var_height_value.set("67.0")
+            self.var_height_unit.set("inches")
+
+    def _on_update_height(self) -> None:
+        """Update the persistent height value"""
+        height_str = self.var_height_value.get().strip()
+        unit = self.var_height_unit.get().strip()
+        
+        try:
+            height_value = float(height_str)
+            if height_value <= 0:
+                messagebox.showerror("Invalid height", "Height must be greater than 0.")
+                return
+        except Exception:
+            messagebox.showerror("Invalid height", "Please enter a numeric height value.")
+            return
+
+        # Convert to inches if needed
+        if unit == "cm":
+            height_inches = height_value * 0.393701  # cm to inches
+        else:  # inches
+            height_inches = height_value
+
+        # Save to height.txt (single value, not time-series)
+        os.makedirs(self.data_dir, exist_ok=True)
+        target = os.path.join(self.data_dir, "height.txt")
+        
+        with open(target, "w") as f:
+            f.write(f"{height_inches:.3f}")
+        
+        self._append_output(f"Height updated to {height_value} {unit} ({height_inches:.3f} inches)")
 
     def _on_residuals_histogram(self) -> None:
         """Generate residuals histogram and normality test"""
