@@ -476,6 +476,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default="weight_trend.png", help="Output plot image path. Default: weight_trend.png")
     parser.add_argument("--no-kalman-plot", action="store_true", help="Do not generate Kalman filter plot")
     parser.add_argument("--no-bodyfat-plot", action="store_true", help="Do not generate body fat plot")
+    parser.add_argument("--no-bmi-plot", action="store_true", help="Do not generate BMI plot")
+    parser.add_argument("--no-ffmi-plot", action="store_true", help="Do not generate FFMI plot")
     parser.add_argument("--kalman-mode", choices=["filter", "smoother"], default="smoother",
                         help="Use forward Kalman filter ('filter') or RTS smoother ('smoother') for historical trend")
     parser.add_argument("--print-table", action="store_true", help="Print table of date, weight, EMA")
@@ -596,10 +598,14 @@ def main() -> None:
         except Exception as e:
             print(f"Failed to render plot: {e}")
     
-    # Generate Kalman filter plot if requested
-    if not args.no_kalman_plot:
+    # Generate plots that require Kalman filtering
+    kalman_states = None
+    kalman_dates = None
+    ci_multiplier = get_confidence_multiplier(args.confidence_interval)
+    
+    # Run Kalman algorithm if any Kalman-dependent plots are requested
+    if not args.no_kalman_plot or not args.no_bodyfat_plot or not args.no_bmi_plot or not args.no_ffmi_plot:
         try:
-            ci_multiplier = get_confidence_multiplier(args.confidence_interval)
             # Run Kalman algorithm per mode
             if args.kalman_mode == "smoother":
                 from kalman import run_kalman_smoother
@@ -608,92 +614,133 @@ def main() -> None:
             else:
                 kalman_states, kalman_dates = run_kalman_filter(entries)
                 plot_label = "Kalman Filter Estimate"
-            
-            if kalman_states:
-                # Create Kalman filter plot (if not disabled)
-                if not args.no_kalman_plot:
-                    create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier)
-                    print("Kalman plot saved to: weight_trend.png")
-                
-                # Create body fat plot using Kalman smoothing (if not disabled)
-                if not args.no_bodyfat_plot:
-                    from kalman import create_bodyfat_plot_from_kalman
-                    try:
-                        create_bodyfat_plot_from_kalman(
-                            entries,
-                            kalman_states,
-                            kalman_dates,
-                            baseline_weight_lb=args.bf_baseline_weight,
-                            baseline_lean_lb=args.bf_baseline_lean,
-                            output_path="bodyfat_trend.png",
-                            no_display=args.no_display,
-                            start_date=start_date,
-                            end_date=end_date,
-                            lbm_csv=args.lbm_csv,
-                            ci_multiplier=ci_multiplier,
-                        )
-                        print("Body fat plot saved to: bodyfat_trend.png")
-                    except Exception as e:
-                        print(f"Failed to generate body fat plot: {e}")
-                
-                # Print Kalman filter summary
-                latest_kalman = kalman_states[-1]
-                print(f"\n=== Kalman Filter Summary ===")
-                print(f"Current weight estimate: {latest_kalman.weight:.2f} ± {ci_multiplier * (latest_kalman.weight_var**0.5):.2f}")
-                
-                # Calculate velocity uncertainty
-                velocity_std = (latest_kalman.velocity_var**0.5)
-                velocity_ci = ci_multiplier * velocity_std
-                velocity_per_week = 7 * latest_kalman.velocity
-                velocity_ci_per_week = 7 * velocity_ci
-                print(f"Current rate: {velocity_per_week:+.3f} ± {velocity_ci_per_week:.3f} lbs/week")
-                print(f"Calorie deficit: {latest_kalman.velocity*3500:+.3f} calories/day")
-                
-                # Calculate forecasts
-                from kalman import WeightKalmanFilter
-                # Initialize KF to the latest state exactly as in the plot code
-                kf = WeightKalmanFilter(
-                    initial_weight=latest_kalman.weight,
-                    initial_velocity=latest_kalman.velocity,
-                    initial_weight_var=latest_kalman.weight_var,
-                    initial_velocity_var=latest_kalman.velocity_var,
-                )
-                # Set full state and covariance including off-diagonal
-                kf.x = np.array([latest_kalman.weight, latest_kalman.velocity], dtype=float)
-                kf.P = np.array([
-                    [latest_kalman.weight_var, latest_kalman.weight_velocity_cov],
-                    [latest_kalman.weight_velocity_cov, latest_kalman.velocity_var],
-                ], dtype=float)
-
-                week_forecast, week_std = kf.forecast(7.0)
-                month_forecast, month_std = kf.forecast(30.0)
-                
-                print(f"1-week forecast: {week_forecast:.2f} ± {ci_multiplier * week_std:.2f}")
-                print(f"1-month forecast: {month_forecast:.2f} ± {ci_multiplier * month_std:.2f}")
-                
-                # Generate residuals histogram if requested
-                if args.residuals_histogram:
-                    try:
-                        from kalman import compute_residuals, create_residuals_histogram
-                        residuals = compute_residuals(entries, kalman_states, kalman_dates, start_date, end_date)
-                        if residuals:
-                            mean_res, std_res, p_value = create_residuals_histogram(
-                                residuals, 
-                                output_path="residuals_histogram.png",
-                                no_display=args.no_display,
-                                start_date=start_date,
-                                end_date=end_date,
-                                ci_multiplier=ci_multiplier
-                            )
-                            print(f"Residuals histogram saved to: residuals_histogram.png")
-                        else:
-                            print("No residuals data available for histogram")
-                    except Exception as e:
-                        print(f"Failed to generate residuals histogram: {e}")
-            else:
-                print("No data available for Kalman filter")
         except Exception as e:
-            print(f"Failed to generate Kalman filter plot: {e}")
+            print(f"Failed to run Kalman filter: {e}")
+            kalman_states = None
+            kalman_dates = None
+    
+    if kalman_states:
+        # Create Kalman filter plot (if not disabled)
+        if not args.no_kalman_plot:
+            create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier)
+            print("Kalman plot saved to: weight_trend.png")
+        
+        # Create body fat plot using Kalman smoothing (if not disabled)
+        if not args.no_bodyfat_plot:
+            from kalman import create_bodyfat_plot_from_kalman
+            try:
+                create_bodyfat_plot_from_kalman(
+                    entries,
+                    kalman_states,
+                    kalman_dates,
+                    baseline_weight_lb=args.bf_baseline_weight,
+                    baseline_lean_lb=args.bf_baseline_lean,
+                    output_path="bodyfat_trend.png",
+                    no_display=args.no_display,
+                    start_date=start_date,
+                    end_date=end_date,
+                    lbm_csv=args.lbm_csv,
+                    ci_multiplier=ci_multiplier,
+                )
+                print("Body fat plot saved to: bodyfat_trend.png")
+            except Exception as e:
+                print(f"Failed to generate body fat plot: {e}")
+        
+        # Create BMI plot using Kalman smoothing (if not disabled)
+        if not args.no_bmi_plot:
+            from kalman import create_bmi_plot_from_kalman
+            try:
+                create_bmi_plot_from_kalman(
+                    entries,
+                    kalman_states,
+                    kalman_dates,
+                    height_file="data/height.txt",
+                    output_path="bmi_trend.png",
+                    no_display=args.no_display,
+                    start_date=start_date,
+                    end_date=end_date,
+                    ci_multiplier=ci_multiplier,
+                )
+                print("BMI plot saved to: bmi_trend.png")
+            except Exception as e:
+                print(f"Failed to generate BMI plot: {e}")
+        
+        # Create FFMI plot using Kalman smoothing (if not disabled)
+        if not args.no_ffmi_plot:
+            from kalman import create_ffmi_plot_from_kalman
+            try:
+                create_ffmi_plot_from_kalman(
+                    entries,
+                    kalman_states,
+                    kalman_dates,
+                    height_file="data/height.txt",
+                    output_path="ffmi_trend.png",
+                    no_display=args.no_display,
+                    start_date=start_date,
+                    end_date=end_date,
+                    lbm_csv=args.lbm_csv,
+                    ci_multiplier=ci_multiplier,
+                )
+                print("FFMI plot saved to: ffmi_trend.png")
+            except Exception as e:
+                print(f"Failed to generate FFMI plot: {e}")
+        
+        # Print Kalman filter summary
+        latest_kalman = kalman_states[-1]
+        print(f"\n=== Kalman Filter Summary ===")
+        print(f"Current weight estimate: {latest_kalman.weight:.2f} ± {ci_multiplier * (latest_kalman.weight_var**0.5):.2f}")
+        
+        # Calculate velocity uncertainty
+        velocity_std = (latest_kalman.velocity_var**0.5)
+        velocity_ci = ci_multiplier * velocity_std
+        velocity_per_week = 7 * latest_kalman.velocity
+        velocity_ci_per_week = 7 * velocity_ci
+        print(f"Current rate: {velocity_per_week:+.3f} ± {velocity_ci_per_week:.3f} lbs/week")
+        print(f"Calorie deficit: {latest_kalman.velocity*3500:+.3f} calories/day")
+        
+        # Calculate forecasts
+        from kalman import WeightKalmanFilter
+        # Initialize KF to the latest state exactly as in the plot code
+        kf = WeightKalmanFilter(
+            initial_weight=latest_kalman.weight,
+            initial_velocity=latest_kalman.velocity,
+            initial_weight_var=latest_kalman.weight_var,
+            initial_velocity_var=latest_kalman.velocity_var,
+        )
+        # Set full state and covariance including off-diagonal
+        kf.x = np.array([latest_kalman.weight, latest_kalman.velocity], dtype=float)
+        kf.P = np.array([
+            [latest_kalman.weight_var, latest_kalman.weight_velocity_cov],
+            [latest_kalman.weight_velocity_cov, latest_kalman.velocity_var],
+        ], dtype=float)
+
+        week_forecast, week_std = kf.forecast(7.0)
+        month_forecast, month_std = kf.forecast(30.0)
+        
+        print(f"1-week forecast: {week_forecast:.2f} ± {ci_multiplier * week_std:.2f}")
+        print(f"1-month forecast: {month_forecast:.2f} ± {ci_multiplier * month_std:.2f}")
+        
+        # Generate residuals histogram if requested
+        if args.residuals_histogram:
+            try:
+                from kalman import compute_residuals, create_residuals_histogram
+                residuals = compute_residuals(entries, kalman_states, kalman_dates, start_date, end_date)
+                if residuals:
+                    mean_res, std_res, p_value = create_residuals_histogram(
+                        residuals, 
+                        output_path="residuals_histogram.png",
+                        no_display=args.no_display,
+                        start_date=start_date,
+                        end_date=end_date,
+                        ci_multiplier=ci_multiplier
+                    )
+                    print(f"Residuals histogram saved to: residuals_histogram.png")
+                else:
+                    print("No residuals data available for histogram")
+            except Exception as e:
+                print(f"Failed to generate residuals histogram: {e}")
+    else:
+        print("No data available for Kalman filter")
 
 
 if __name__ == "__main__":

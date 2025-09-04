@@ -30,7 +30,7 @@ class WeightTrackerGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Weight Tracker")
-        self.root.geometry("1080x720")
+        self.root.geometry("1080x880")
         # Allow both horizontal and vertical resizing
         self.root.resizable(True, True)
         self.root.minsize(640, 420)
@@ -62,6 +62,8 @@ class WeightTrackerGUI:
         self.var_show_weight = tk.BooleanVar(value=True)
         self.var_show_weight_plot = tk.BooleanVar(value=True)
         self.var_show_bodyfat_plot = tk.BooleanVar(value=True)
+        self.var_show_bmi_plot = tk.BooleanVar(value=False)
+        self.var_show_ffmi_plot = tk.BooleanVar(value=False)
         self.var_show_residuals_plot = tk.BooleanVar(value=False)
         self.var_aggregation_hours = tk.StringVar(value="3")
         self.var_no_display = tk.BooleanVar(value=False)
@@ -114,9 +116,11 @@ class WeightTrackerGUI:
         tk.Label(root, text="Generate plots:").grid(row=row, column=0, sticky="e", **pad)
         plot_frame = tk.Frame(root)
         plot_frame.grid(row=row, column=1, sticky="w", **pad)
-        tk.Checkbutton(plot_frame, text="Weight trend", variable=self.var_show_weight_plot).grid(row=0, column=0, sticky="w", padx=(0, 20))
-        tk.Checkbutton(plot_frame, text="Body fat %", variable=self.var_show_bodyfat_plot).grid(row=0, column=1, sticky="w", padx=(0, 20))
-        tk.Checkbutton(plot_frame, text="Residuals histogram", variable=self.var_show_residuals_plot).grid(row=0, column=2, sticky="w")
+        tk.Checkbutton(plot_frame, text="Weight trend", variable=self.var_show_weight_plot).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        tk.Checkbutton(plot_frame, text="Body fat %", variable=self.var_show_bodyfat_plot).grid(row=0, column=1, sticky="w", padx=(0, 12))
+        tk.Checkbutton(plot_frame, text="BMI", variable=self.var_show_bmi_plot).grid(row=0, column=2, sticky="w", padx=(0, 12))
+        tk.Checkbutton(plot_frame, text="FFMI", variable=self.var_show_ffmi_plot).grid(row=0, column=3, sticky="w", padx=(0, 12))
+        tk.Checkbutton(plot_frame, text="Residuals histogram", variable=self.var_show_residuals_plot).grid(row=0, column=4, sticky="w")
 
         row += 1
         tk.Checkbutton(root, text="Save plots as PNG files", variable=self.var_show_weight).grid(row=row, column=1, sticky="w", **pad)
@@ -130,6 +134,12 @@ class WeightTrackerGUI:
 
         row += 1
         tk.Button(root, text="Open body fat plot", command=lambda: self._open_file(os.path.join(self.project_dir, "bodyfat_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
+
+        row += 1
+        tk.Button(root, text="Open BMI plot", command=lambda: self._open_file(os.path.join(self.project_dir, "bmi_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
+
+        row += 1
+        tk.Button(root, text="Open FFMI plot", command=lambda: self._open_file(os.path.join(self.project_dir, "ffmi_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
         tk.Button(root, text="Open residuals plot", command=lambda: self._open_file(os.path.join(self.project_dir, "residuals_histogram.png"))).grid(row=row, column=2, sticky="w", **pad)
@@ -317,6 +327,10 @@ class WeightTrackerGUI:
                 args += ["--no-kalman-plot", "--no-plot"]  # Disable both weight trend plots
             if not self.var_show_bodyfat_plot.get():
                 args += ["--no-bodyfat-plot"]
+            if not self.var_show_bmi_plot.get():
+                args += ["--no-bmi-plot"]
+            if not self.var_show_ffmi_plot.get():
+                args += ["--no-ffmi-plot"]
             if self.var_show_residuals_plot.get():
                 args += ["--residuals-histogram"]
             if not self.var_show_weight.get():
@@ -380,6 +394,10 @@ class WeightTrackerGUI:
                 sys.argv += ["--no-kalman-plot", "--no-plot"]  # Disable both weight trend plots
             if not self.var_show_bodyfat_plot.get():
                 sys.argv += ["--no-bodyfat-plot"]
+            if not self.var_show_bmi_plot.get():
+                sys.argv += ["--no-bmi-plot"]
+            if not self.var_show_ffmi_plot.get():
+                sys.argv += ["--no-ffmi-plot"]
             if self.var_show_residuals_plot.get():
                 sys.argv += ["--residuals-histogram"]
             if not self.var_show_weight.get():

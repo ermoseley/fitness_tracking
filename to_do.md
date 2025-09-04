@@ -1,10 +1,7 @@
 To do list (small):
-1. Auto-create csv if none exists
-2. Uploading csv is actually a copy into the app directory
-3. Polish GUI text 
+1. Include BF data calibrated w/ DEXA. More details to sort out here too.
 4. Rename kalman.py to kalman_filter.py
 5. Add uncertainty fan/prediction one month out.
-6. Add option to just specify bf%s at specific dates instead of LBM
 
 
 To do list (big):

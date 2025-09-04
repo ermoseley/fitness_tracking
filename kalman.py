@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import numpy as np
 from datetime import date, datetime, timedelta
 from typing import List, Tuple, Optional, Dict
@@ -1050,6 +1051,309 @@ def compute_residuals(entries, states, dates, start_date: Optional[date] = None,
             residuals.append(residual)
     
     return residuals
+
+
+def _load_height_data(height_file: str) -> Optional[float]:
+    """Load height data from height.txt file. Returns height in inches or None if not found."""
+    try:
+        if os.path.exists(height_file):
+            with open(height_file, 'r') as f:
+                height_inches = float(f.read().strip())
+                return height_inches
+    except Exception:
+        pass
+    return None
+
+
+def create_bmi_plot_from_kalman(
+    entries,
+    states,
+    dates,
+    height_file: str = "data/height.txt",
+    output_path: str = "bmi_trend.png",
+    no_display: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    ci_multiplier: float = 1.96,
+) -> None:
+    """
+    Create BMI vs Date plot using Kalman-smoothed weights and height data.
+    
+    BMI = weight(kg) / height(m)^2
+    For imperial units: BMI = (weight_lb / height_in^2) * 703
+    """
+    if not entries or not states:
+        return
+
+    # Load height data
+    height_inches = _load_height_data(height_file)
+    if height_inches is None:
+        print(f"Warning: No height data found at {height_file}. BMI plot cannot be generated.")
+        return
+
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
+        if end_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
+        
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+
+    # Use smoothed Kalman mean and std over a dense date grid
+    dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(states, dates)
+    if not dense_datetimes:
+        return
+    
+    # Filter dense curves by date range if specified
+    if start_date or end_date:
+        filtered_dense_datetimes = []
+        filtered_dense_means = []
+        filtered_dense_stds = []
+        for dt, mean, std in zip(dense_datetimes, dense_means, dense_stds):
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+            filtered_dense_datetimes.append(dt)
+            filtered_dense_means.append(mean)
+            filtered_dense_stds.append(std)
+        dense_datetimes = filtered_dense_datetimes
+        dense_means = filtered_dense_means
+        dense_stds = filtered_dense_stds
+
+    # Convert height to meters for BMI calculation
+    height_m = height_inches * 0.0254  # inches to meters
+    
+    # Calculate BMI from Kalman-smoothed weights
+    # BMI = weight(kg) / height(m)^2
+    # weight_lb * 0.453592 = weight_kg
+    bmi_means = [(w * 0.453592) / (height_m ** 2) for w in dense_means]
+    
+    # Calculate BMI confidence band
+    weight_lo = [max(1e-6, m - ci_multiplier * s) for m, s in zip(dense_means, dense_stds)]
+    weight_hi = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
+    bmi_lo = [(w * 0.453592) / (height_m ** 2) for w in weight_lo]
+    bmi_hi = [(w * 0.453592) / (height_m ** 2) for w in weight_hi]
+    
+    # Calculate BMI for actual measurements
+    entry_datetimes = [e.entry_datetime for e in filtered_entries]
+    entry_weights = [float(e.weight) for e in filtered_entries]
+    entry_bmi = [(w * 0.453592) / (height_m ** 2) for w in entry_weights]
+
+    # Plot
+    import matplotlib
+    if no_display:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 8), dpi=100)
+
+    # Confidence band around BMI mean
+    plt.fill_between(
+        dense_datetimes,
+        bmi_lo,
+        bmi_hi,
+        alpha=0.3,
+        color="blue",
+        label=f"BMI {ci_multiplier:.1f}σ confidence band"
+    )
+
+    # BMI mean line
+    plt.plot(dense_datetimes, bmi_means, "b-", linewidth=2, label="BMI (Kalman smoothed)")
+
+    # Scatter points for actual measurements
+    plt.scatter(entry_datetimes, entry_bmi, color="red", s=30, alpha=0.7, label="BMI (measurements)")
+
+    # BMI categories
+    plt.axhline(y=18.5, color="green", linestyle="--", alpha=0.7, label="Underweight (18.5)")
+    plt.axhline(y=25.0, color="orange", linestyle="--", alpha=0.7, label="Normal (25.0)")
+    plt.axhline(y=30.0, color="red", linestyle="--", alpha=0.7, label="Overweight (30.0)")
+
+    plt.xlabel("Date")
+    plt.ylabel("BMI (kg/m²)")
+    plt.title(f"BMI Trend (Height: {height_inches:.1f}\" = {height_m:.2f}m)")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Format x-axis
+    plt.gca().xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%Y-%m-%d"))
+    plt.gca().xaxis.set_major_locator(plt.matplotlib.dates.MonthLocator(interval=3))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    if not no_display:
+        plt.show()
+    plt.close()
+
+
+def create_ffmi_plot_from_kalman(
+    entries,
+    states,
+    dates,
+    height_file: str = "data/height.txt",
+    output_path: str = "ffmi_trend.png",
+    no_display: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    lbm_csv: Optional[str] = None,
+    ci_multiplier: float = 1.96,
+) -> None:
+    """
+    Create FFMI (Fat-Free Mass Index) vs Date plot using Kalman-smoothed weights and height data.
+    
+    FFMI = LBM(kg) / height(m)^2
+    For imperial units: FFMI = (LBM_lb / height_in^2) * 703
+    """
+    if not entries or not states:
+        return
+
+    # Load height data
+    height_inches = _load_height_data(height_file)
+    if height_inches is None:
+        print(f"Warning: No height data found at {height_file}. FFMI plot cannot be generated.")
+        return
+
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
+        if end_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
+        
+        if not filtered_entries:
+            print(f"Warning: No data in specified date range {start_date} to {end_date}")
+            return
+
+    # Use smoothed Kalman mean and std over a dense date grid
+    dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(states, dates)
+    if not dense_datetimes:
+        return
+    
+    # Filter dense curves by date range if specified
+    if start_date or end_date:
+        filtered_dense_datetimes = []
+        filtered_dense_means = []
+        filtered_dense_stds = []
+        for dt, mean, std in zip(dense_datetimes, dense_means, dense_stds):
+            dt_date = dt.date()
+            if start_date and dt_date < start_date:
+                continue
+            if end_date and dt_date > end_date:
+                continue
+            filtered_dense_datetimes.append(dt)
+            filtered_dense_means.append(mean)
+            filtered_dense_stds.append(std)
+        dense_datetimes = filtered_dense_datetimes
+        dense_means = filtered_dense_means
+        dense_stds = filtered_dense_stds
+
+    # Convert height to meters for FFMI calculation
+    height_m = height_inches * 0.0254  # inches to meters
+    
+    # Calculate LBM from Kalman-smoothed weights
+    # Use the same LBM calculation logic as body fat plot
+    if lbm_csv:
+        lbm_points = _load_lbm_csv(lbm_csv)
+        if not lbm_points:
+            # Fall back to estimated LBM if LBM file empty/unreadable
+            lbm_points = None
+    else:
+        lbm_points = None
+    
+    if lbm_points:
+        # Use provided LBM data
+        dense_lbm = _evaluate_lbm_series(dense_datetimes, lbm_points)
+        # Calculate FFMI from LBM
+        ffmi_means = [(lbm * 0.453592) / (height_m ** 2) for lbm in dense_lbm]
+        
+        # Calculate FFMI confidence band using weight uncertainty
+        # Approximate LBM uncertainty from weight uncertainty (assuming constant body fat %)
+        weight_lo = [max(1e-6, m - ci_multiplier * s) for m, s in zip(dense_means, dense_stds)]
+        weight_hi = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
+        # For simplicity, assume LBM varies proportionally with weight
+        lbm_lo = [lbm * (w_lo / w) for lbm, w_lo, w in zip(dense_lbm, weight_lo, dense_means)]
+        lbm_hi = [lbm * (w_hi / w) for lbm, w_hi, w in zip(dense_lbm, weight_hi, dense_means)]
+        ffmi_lo = [(lbm * 0.453592) / (height_m ** 2) for lbm in lbm_lo]
+        ffmi_hi = [(lbm * 0.453592) / (height_m ** 2) for lbm in lbm_hi]
+        
+        # Calculate FFMI for actual measurements
+        entry_datetimes = [e.entry_datetime for e in filtered_entries]
+        entry_weights = [float(e.weight) for e in filtered_entries]
+        entry_lbm = _evaluate_lbm_series(entry_datetimes, lbm_points)
+        entry_ffmi = [(lbm * 0.453592) / (height_m ** 2) for lbm in entry_lbm]
+    else:
+        # Estimate LBM from weight using a simple model (assuming ~15% body fat)
+        estimated_bf = 0.15  # 15% body fat
+        dense_lbm = [w * (1.0 - estimated_bf) for w in dense_means]
+        ffmi_means = [(lbm * 0.453592) / (height_m ** 2) for lbm in dense_lbm]
+        
+        # Calculate FFMI confidence band
+        weight_lo = [max(1e-6, m - ci_multiplier * s) for m, s in zip(dense_means, dense_stds)]
+        weight_hi = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
+        lbm_lo = [w * (1.0 - estimated_bf) for w in weight_lo]
+        lbm_hi = [w * (1.0 - estimated_bf) for w in weight_hi]
+        ffmi_lo = [(lbm * 0.453592) / (height_m ** 2) for lbm in lbm_lo]
+        ffmi_hi = [(lbm * 0.453592) / (height_m ** 2) for lbm in lbm_hi]
+        
+        # Calculate FFMI for actual measurements
+        entry_datetimes = [e.entry_datetime for e in filtered_entries]
+        entry_weights = [float(e.weight) for e in filtered_entries]
+        entry_lbm = [w * (1.0 - estimated_bf) for w in entry_weights]
+        entry_ffmi = [(lbm * 0.453592) / (height_m ** 2) for lbm in entry_lbm]
+
+    # Plot
+    import matplotlib
+    if no_display:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 8), dpi=100)
+
+    # Confidence band around FFMI mean
+    plt.fill_between(
+        dense_datetimes,
+        ffmi_lo,
+        ffmi_hi,
+        alpha=0.3,
+        color="blue",
+        label=f"FFMI {ci_multiplier:.1f}σ confidence band"
+    )
+
+    # FFMI mean line
+    plt.plot(dense_datetimes, ffmi_means, "b-", linewidth=2, label="FFMI (Kalman smoothed)")
+
+    # Scatter points for actual measurements
+    plt.scatter(entry_datetimes, entry_ffmi, color="red", s=30, alpha=0.7, label="FFMI (measurements)")
+
+    # FFMI reference lines (typical ranges for men)
+    plt.axhline(y=16.0, color="red", linestyle="--", alpha=0.7, label="Below average (16.0)")
+    plt.axhline(y=18.0, color="orange", linestyle="--", alpha=0.7, label="Average (18.0)")
+    plt.axhline(y=20.0, color="green", linestyle="--", alpha=0.7, label="Above average (20.0)")
+    plt.axhline(y=22.0, color="blue", linestyle="--", alpha=0.7, label="Excellent (22.0)")
+
+    plt.xlabel("Date")
+    plt.ylabel("FFMI (kg/m²)")
+    plt.title(f"FFMI Trend (Height: {height_inches:.1f}\" = {height_m:.2f}m)")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Format x-axis
+    plt.gca().xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%Y-%m-%d"))
+    plt.gca().xaxis.set_major_locator(plt.matplotlib.dates.MonthLocator(interval=3))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    if not no_display:
+        plt.show()
+    plt.close()
 
 
 def create_residuals_histogram(residuals: List[float], 
