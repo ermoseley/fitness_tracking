@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
 from scipy.interpolate import CubicSpline
+from scipy import stats
 import matplotlib.pyplot as plt
 import csv
 
@@ -197,12 +198,12 @@ def run_kalman_filter(entries,
     states = []
     dates = []
     
-    prev_date = None
+    prev_datetime = None
     
     for entry in entries:
-        if prev_date is not None:
-            # Predict forward to current date
-            dt_days = (entry.entry_date - prev_date).days
+        if prev_datetime is not None:
+            # Predict forward to current datetime
+            dt_days = (entry.entry_datetime - prev_datetime).total_seconds() / 86400.0
             if dt_days > 0:
                 kf.predict(dt_days)
         
@@ -217,9 +218,9 @@ def run_kalman_filter(entries,
             velocity_var=kf.state.velocity_var,
             weight_velocity_cov=kf.state.weight_velocity_cov
         ))
-        dates.append(entry.entry_date)
+        dates.append(entry.entry_datetime)
         
-        prev_date = entry.entry_date
+        prev_datetime = entry.entry_datetime
     
     return states, dates
 
@@ -259,7 +260,7 @@ def run_kalman_smoother(entries,
     x_pred_list: List[np.ndarray] = []  # x_{k+1|k}
     P_pred_list: List[np.ndarray] = []  # P_{k+1|k}
 
-    prev_date: Optional[date] = None
+    prev_datetime: Optional[datetime] = None
 
     for idx, entry in enumerate(entries):
         if idx == 0:
@@ -267,12 +268,12 @@ def run_kalman_smoother(entries,
             kf.update(entry.weight)
             filtered_x_list.append(kf.x.copy())
             filtered_P_list.append(kf.P.copy())
-            dates.append(entry.entry_date)
-            prev_date = entry.entry_date
+            dates.append(entry.entry_datetime)
+            prev_datetime = entry.entry_datetime
             continue
 
-        # Time delta in days (allow zero for repeated same-day entries)
-        dt_days = max(0, (entry.entry_date - prev_date).days if prev_date is not None else 0)
+        # Time delta in days (allow zero for repeated same-time entries)
+        dt_days = max(0, (entry.entry_datetime - prev_datetime).total_seconds() / 86400.0 if prev_datetime is not None else 0)
         # Transition used in predict step
         F = np.array([[1.0, float(dt_days)], [0.0, 1.0]], dtype=float)
 
@@ -286,8 +287,8 @@ def run_kalman_smoother(entries,
         kf.update(entry.weight)
         filtered_x_list.append(kf.x.copy())
         filtered_P_list.append(kf.P.copy())
-        dates.append(entry.entry_date)
-        prev_date = entry.entry_date
+        dates.append(entry.entry_datetime)
+        prev_datetime = entry.entry_datetime
 
     n = len(filtered_x_list)
     if n == 0:
@@ -360,10 +361,10 @@ def interpolate_kalman_states(states,
         else:
             return [], [], []
     
-    # Convert dates to days from first date for numerical interpolation
+    # Convert datetimes to days from first datetime for numerical interpolation
     t0 = dates[0]
-    t_original = [(d - t0).days for d in dates]
-    t_target = [(d - t0).days for d in target_dates]
+    t_original = [(d - t0).total_seconds() / 86400.0 for d in dates]
+    t_target = [(d - t0).total_seconds() / 86400.0 for d in target_dates]
     
     # Ensure strictly increasing time values
     if len(set(t_original)) != len(t_original):
@@ -433,8 +434,8 @@ def compute_kalman_mean_std_spline(states, dates) -> Tuple[List[datetime], List[
     if not states:
         return [], [], []
 
-    # Use datetimes for smooth plotting and collapse duplicate dates by averaging
-    entry_datetimes = [datetime.combine(d, datetime.min.time()) for d in dates]
+    # Use datetimes directly for smooth plotting and collapse duplicate datetimes by averaging
+    entry_datetimes = [d for d in dates]
 
     from collections import defaultdict
     dt_to_means = defaultdict(list)
@@ -547,7 +548,8 @@ def create_kalman_plot(entries,
                       no_display: bool = False,
                       label: str = "Kalman Filter Estimate",
                       start_date: Optional[date] = None,
-                      end_date: Optional[date] = None) -> None:
+                      end_date: Optional[date] = None,
+                      ci_multiplier: float = 1.96) -> None:
     """
     Create Kalman filter plot with raw data, filtered state, and confidence bands
     
@@ -564,9 +566,13 @@ def create_kalman_plot(entries,
     filtered_entries = entries
     if start_date or end_date:
         if start_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
+            # Convert start_date to datetime at beginning of day
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_datetime]
         if end_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
+            # Convert end_date to datetime at end of day
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_datetime]
         
         if not filtered_entries:
             print(f"Warning: No data in specified date range {start_date} to {end_date}")
@@ -593,7 +599,7 @@ def create_kalman_plot(entries,
         dense_means = filtered_dense_means
         dense_stds = filtered_dense_stds
     
-    entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
+    entry_datetimes = [e.entry_datetime for e in filtered_entries]
     
     # Create plot with high-quality settings
     plt.figure(figsize=(12, 8), dpi=100)
@@ -601,14 +607,14 @@ def create_kalman_plot(entries,
     # Set matplotlib parameters for smooth curves (non-intrusive)
     plt.rcParams['savefig.dpi'] = 150
     
-    # Plot confidence bands (95% confidence interval)
-    confidence_level = 1.96  # 95% confidence
-    upper_band = [m + confidence_level * s for m, s in zip(dense_means, dense_stds)]
-    lower_band = [m - confidence_level * s for m, s in zip(dense_means, dense_stds)]
+    # Plot confidence bands
+    upper_band = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
+    lower_band = [m - ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
     
     # Fill confidence bands with anti-aliasing for smooth curves
+    ci_label = f"{ci_multiplier:.1f}σ Confidence Interval" if ci_multiplier == 1.0 else f"{ci_multiplier/1.96*95:.0f}% Confidence Interval"
     plt.fill_between(dense_datetimes, lower_band, upper_band, 
-                     alpha=0.3, color='gray', label='95% Confidence Interval',
+                     alpha=0.3, color='gray', label=ci_label,
                      antialiased=True, linewidth=0)
     
     # Plot filtered/smoothed state mean with anti-aliasing for smooth curves
@@ -646,20 +652,20 @@ def create_kalman_plot(entries,
     week_forecast, week_std = kf.forecast(7.0)
     month_forecast, month_std = kf.forecast(30.0)
     
-    # Calculate velocity uncertainty (95% confidence interval)
+    # Calculate velocity uncertainty
     velocity_std = np.sqrt(max(latest_state.velocity_var, 0.0))
-    velocity_ci = 1.96 * velocity_std
+    velocity_ci = ci_multiplier * velocity_std
     velocity_per_week = 7 * latest_state.velocity
     velocity_ci_per_week = 7 * velocity_ci
     
     # Create stats text (mean/std from spline; slope from latest Kalman state)
     stats_text = f"""Current Estimate ({latest_date})
-Weight: {current_mean:.2f} ± {1.96 * current_std:.2f}
+Weight: {current_mean:.2f} ± {ci_multiplier * current_std:.2f}
 Rate: {velocity_per_week:+.3f} ± {velocity_ci_per_week:.3f} lbs/week
 
 Forecasts:
-1 week: {week_forecast:.2f} ± {1.96 * week_std:.2f}
-1 month: {month_forecast:.2f} ± {1.96 * month_std:.2f}"""
+1 week: {week_forecast:.2f} ± {ci_multiplier * week_std:.2f}
+1 month: {month_forecast:.2f} ± {ci_multiplier * month_std:.2f}"""
     
     # Add stats box
     ax = plt.gca()
@@ -726,6 +732,7 @@ def create_bodyfat_plot_from_kalman(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     lbm_csv: Optional[str] = None,
+    ci_multiplier: float = 1.96,
 ) -> None:
     """
     Create Estimated Body Fat % vs Date plot using Kalman-smoothed weights.
@@ -794,9 +801,8 @@ def create_bodyfat_plot_from_kalman(
                   for w, l in zip(dense_means, dense_lbm)]
 
         # Confidence band: BF(W±z*std) with LBM fixed
-        z = 1.96
-        w_lo = [max(1e-6, m - z * s) for m, s in zip(dense_means, dense_stds)]
-        w_hi = [m + z * s for m, s in zip(dense_means, dense_stds)]
+        w_lo = [max(1e-6, m - ci_multiplier * s) for m, s in zip(dense_means, dense_stds)]
+        w_hi = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
         bf_mid_lo = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, wl))))))
                      for wl, l in zip(w_lo, dense_lbm)]
         bf_mid_hi = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, wh))))))
@@ -805,7 +811,7 @@ def create_bodyfat_plot_from_kalman(
         bf_band_upper = [max(a, b) for a, b in zip(bf_mid_lo, bf_mid_hi)]
 
         # Entry points BF from entries and interpolated LBM
-        entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
+        entry_datetimes = [e.entry_datetime for e in filtered_entries]
         entry_weights = [float(e.weight) for e in filtered_entries]
         entry_lbm = _evaluate_lbm_series(entry_datetimes, lbm_points)
         entry_bf_mid = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, w))))))
@@ -823,9 +829,8 @@ def create_bodyfat_plot_from_kalman(
         )
 
         # Confidence band for midline: evaluate transformation at W±z*std
-        z = 1.96
-        w_lo = [max(1e-6, m - z * s) for m, s in zip(dense_means, dense_stds)]
-        w_hi = [m + z * s for m, s in zip(dense_means, dense_stds)]
+        w_lo = [max(1e-6, m - ci_multiplier * s) for m, s in zip(dense_means, dense_stds)]
+        w_hi = [m + ci_multiplier * s for m, s in zip(dense_means, dense_stds)]
         bf_mid_lo = _compute_bodyfat_pct_from_weight(
             w_lo, dense_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
         )
@@ -845,7 +850,7 @@ def create_bodyfat_plot_from_kalman(
         )
 
         # Scatter points for actual measurements under mid scenario
-        entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
+        entry_datetimes = [e.entry_datetime for e in filtered_entries]
         entry_weights = [float(e.weight) for e in filtered_entries]
         entry_bf_mid = _compute_bodyfat_pct_from_weight(
             entry_weights, entry_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
@@ -911,7 +916,7 @@ def create_bodyfat_plot_from_kalman(
     # For the body fat model: BF% = 100 * (W - L) / W where L = L0 + s*(W - W0)
     # The rate uncertainty comes from the weight velocity uncertainty
     weight_velocity_std = np.sqrt(max(states[-1].velocity_var, 0.0))
-    weight_velocity_ci = 1.96 * weight_velocity_std
+    weight_velocity_ci = ci_multiplier * weight_velocity_std
     
     # Approximate BF rate uncertainty using finite differences around current weight
     current_weight = float(dense_means[-1])
@@ -953,15 +958,15 @@ def create_bodyfat_plot_from_kalman(
         if lbm_csv:
             future_lbm = _evaluate_lbm_series([future_dt], lbm_points)[0]
             bf_mid_val = float(max(0.0, min(100.0, 100.0 * (1.0 - (future_lbm / max(1e-6, w))))))
-            w_lo_f = max(1e-6, w - 1.96 * w_std)
-            w_hi_f = w + 1.96 * w_std
+            w_lo_f = max(1e-6, w - ci_multiplier * w_std)
+            w_hi_f = w + ci_multiplier * w_std
             bf_lo_val = float(max(0.0, min(100.0, 100.0 * (1.0 - (future_lbm / max(1e-6, w_lo_f))))))
             bf_hi_val = float(max(0.0, min(100.0, 100.0 * (1.0 - (future_lbm / max(1e-6, w_hi_f))))))
         else:
             s_mid = 0.10
             bf_mid_val = _compute_bodyfat_pct_from_weight([w], [future_dt], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
-            bf_lo_val = _compute_bodyfat_pct_from_weight([max(1e-6, w - 1.96 * w_std)], [future_dt], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
-            bf_hi_val = _compute_bodyfat_pct_from_weight([w + 1.96 * w_std], [future_dt], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
+            bf_lo_val = _compute_bodyfat_pct_from_weight([max(1e-6, w - ci_multiplier * w_std)], [future_dt], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
+            bf_hi_val = _compute_bodyfat_pct_from_weight([w + ci_multiplier * w_std], [future_dt], baseline_weight_lb, baseline_lean_lb, s_mid)[0]
         halfwidth = float(max(bf_hi_val - bf_mid_val, bf_mid_val - bf_lo_val))
         return bf_mid_val, halfwidth
 
@@ -1000,3 +1005,190 @@ def create_bodyfat_plot_from_kalman(
         plt.close()
     else:
         plt.show()
+
+
+def compute_residuals(entries, states, dates, start_date: Optional[date] = None, end_date: Optional[date] = None) -> List[float]:
+    """
+    Compute residuals (differences) between Kalman filter output and raw measurements.
+    
+    Args:
+        entries: List of WeightEntry objects
+        states: List of KalmanState objects from Kalman filter
+        dates: List of dates corresponding to states
+        start_date: Optional start date for filtering
+        end_date: Optional end date for filtering
+        
+    Returns:
+        List of residuals (raw_weight - kalman_weight) for each measurement
+    """
+    if not entries or not states or not dates:
+        return []
+    
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            # Convert start_date to datetime at beginning of day
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_datetime]
+        if end_date:
+            # Convert end_date to datetime at end of day
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_datetime]
+        
+        if not filtered_entries:
+            return []
+    
+    # Create a mapping from datetime to Kalman state for efficient lookup
+    datetime_to_state = {d: s for d, s in zip(dates, states)}
+    
+    residuals = []
+    for entry in filtered_entries:
+        if entry.entry_datetime in datetime_to_state:
+            kalman_weight = datetime_to_state[entry.entry_datetime].weight
+            residual = entry.weight - kalman_weight
+            residuals.append(residual)
+    
+    return residuals
+
+
+def create_residuals_histogram(residuals: List[float], 
+                              output_path: str = "residuals_histogram.png",
+                              no_display: bool = False,
+                              start_date: Optional[date] = None,
+                              end_date: Optional[date] = None,
+                              ci_multiplier: float = 1.96) -> Tuple[float, float, float]:
+    """
+    Create a normalized histogram of residuals with normal distribution overlay and normality test.
+    
+    Args:
+        residuals: List of residuals (raw_weight - kalman_weight)
+        output_path: Path to save the plot
+        no_display: Whether to display the plot or just save it
+        start_date: Optional start date for plot title
+        end_date: Optional end date for plot title
+        
+    Returns:
+        Tuple of (mean, std, p_value) from normality test
+    """
+    if not residuals:
+        print("No residuals data available for histogram")
+        return 0.0, 0.0, 1.0
+    
+    residuals_array = np.array(residuals)
+    mean_residual = np.mean(residuals_array)
+    std_residual = np.std(residuals_array, ddof=1)  # Sample standard deviation
+    skewness = stats.skew(residuals_array)
+    excess_kurtosis = stats.kurtosis(residuals_array)  # Excess kurtosis (normal = 0)
+    
+    # Perform Shapiro-Wilk normality test
+    if len(residuals_array) >= 3:  # Minimum sample size for Shapiro-Wilk
+        shapiro_stat, shapiro_p = stats.shapiro(residuals_array)
+        # Also try Kolmogorov-Smirnov test as backup
+        ks_stat, ks_p = stats.kstest(residuals_array, 'norm', args=(mean_residual, std_residual))
+    else:
+        shapiro_stat, shapiro_p = 0.0, 1.0
+        ks_stat, ks_p = 0.0, 1.0
+    
+    # Create the plot
+    import matplotlib
+    if no_display:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    
+    plt.figure(figsize=(10, 6))
+    
+    # Create histogram with density=True for normalization
+    n, bins, patches = plt.hist(residuals_array, bins=20, density=True, alpha=0.7, 
+                               color='skyblue', edgecolor='black', linewidth=0.5,
+                               label=f'Residuals (n={len(residuals_array)})')
+    
+    # Create normal distribution overlay with same mean and std
+    x_range = np.linspace(residuals_array.min(), residuals_array.max(), 100)
+    normal_dist = stats.norm.pdf(x_range, loc=0, scale=std_residual)  # Mean assumed to be 0
+    plt.plot(x_range, normal_dist, 'r-', linewidth=2, 
+             label=f'Normal(μ=0, σ={std_residual:.3f})')
+    
+    # Add vertical line at mean
+    plt.axvline(mean_residual, color='green', linestyle='--', linewidth=2, 
+                label=f'Mean = {mean_residual:.3f}')
+    
+    # Add vertical lines at ±1 and ±2 standard deviations
+    plt.axvline(std_residual, color='orange', linestyle=':', alpha=0.7, 
+                label=f'+1σ = {std_residual:.3f}')
+    plt.axvline(-std_residual, color='orange', linestyle=':', alpha=0.7, 
+                label=f'-1σ = {-std_residual:.3f}')
+    plt.axvline(ci_multiplier*std_residual, color='red', linestyle=':', alpha=0.7, 
+                label=f'+{ci_multiplier:.1f}σ = {ci_multiplier*std_residual:.3f}')
+    plt.axvline(-ci_multiplier*std_residual, color='red', linestyle=':', alpha=0.7, 
+                label=f'-{ci_multiplier:.1f}σ = {-ci_multiplier*std_residual:.3f}')
+    
+    # Create title with date range if provided
+    title = "Residuals Histogram (Kalman Filter vs Raw Data)"
+    if start_date and end_date:
+        title += f"\nDate Range: {start_date} to {end_date}"
+    elif start_date:
+        title += f"\nFrom: {start_date}"
+    elif end_date:
+        title += f"\nUntil: {end_date}"
+    
+    plt.title(title)
+    plt.xlabel("Residual (Raw Weight - Kalman Weight) [lbs]")
+    plt.ylabel("Density")
+    plt.grid(True, alpha=0.3)
+    plt.legend(loc='upper right', bbox_to_anchor=(0.98, 0.98))
+    
+    # Add statistics text box
+    stats_text = f"""Statistics:
+Mean: {mean_residual:.4f} lbs
+Std Dev: {std_residual:.4f} lbs
+Skewness: {skewness:.4f}
+Excess Kurtosis: {excess_kurtosis:.4f}
+
+Normality Tests:
+Shapiro-Wilk: p = {shapiro_p:.4f}
+Kolmogorov-Smirnov: p = {ks_p:.4f}
+
+Interpretation:
+p > 0.05: Residuals appear normal
+p ≤ 0.05: Residuals may not be normal
+Skewness: 0 = symmetric, >0 = right tail, <0 = left tail
+Kurtosis: 0 = normal, >0 = heavy tails, <0 = light tails"""
+    
+    plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes, 
+             verticalalignment='top', horizontalalignment='left', fontsize=9,
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'))
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    
+    if no_display:
+        plt.close()
+    else:
+        plt.show()
+    
+    # Print summary to console
+    print(f"\n=== Residuals Analysis ===")
+    print(f"Number of residuals: {len(residuals_array)}")
+    print(f"Mean residual: {mean_residual:.4f} lbs")
+    print(f"Standard deviation: {std_residual:.4f} lbs")
+    print(f"Skewness: {skewness:.4f}")
+    print(f"Excess kurtosis: {excess_kurtosis:.4f}")
+    print(f"Shapiro-Wilk normality test: p = {shapiro_p:.4f}")
+    print(f"Kolmogorov-Smirnov normality test: p = {ks_p:.4f}")
+    
+    if shapiro_p > 0.05:
+        print("✓ Residuals appear to be normally distributed (p > 0.05)")
+    else:
+        print("⚠ Residuals may not be normally distributed (p ≤ 0.05)")
+    
+    # Additional interpretation based on skewness and kurtosis
+    if abs(skewness) > 0.5:
+        skew_direction = "right" if skewness > 0 else "left"
+        print(f"⚠ Distribution is skewed {skew_direction} (|skewness| = {abs(skewness):.3f} > 0.5)")
+    
+    if abs(excess_kurtosis) > 0.5:
+        kurt_type = "heavy" if excess_kurtosis > 0 else "light"
+        print(f"⚠ Distribution has {kurt_type} tails (|excess kurtosis| = {abs(excess_kurtosis):.3f} > 0.5)")
+    
+    return mean_residual, std_residual, shapiro_p

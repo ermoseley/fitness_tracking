@@ -5,8 +5,9 @@ import csv
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, time
 from typing import List, Tuple, Optional, Dict
+from datetime import timedelta
 
 import numpy as np
 
@@ -20,7 +21,7 @@ from kalman import run_kalman_filter, create_kalman_plot
 
 @dataclass
 class WeightEntry:
-    entry_date: date
+    entry_datetime: datetime
     weight: float
 
 
@@ -28,29 +29,63 @@ class WeightEntry:
 # Utilities
 # ---------------------------
 
-DATE_FORMATS = [
-    "%Y-%m-%d",  # 2025-08-19
-    "%m/%d/%Y",  # 08/19/2025
-    "%m/%d/%y",   # 8/19/25
-    "%Y/%m/%d",  # 2025/08/19
-    "%d-%b-%Y",  # 19-Aug-2025
+DATETIME_FORMATS = [
+    "%Y-%m-%d %H:%M:%S",     # 2025-08-19 14:30:00
+    "%Y-%m-%d %H:%M",        # 2025-08-19 14:30
+    "%Y-%m-%dT%H:%M:%S",     # 2025-08-19T14:30:00
+    "%Y-%m-%dT%H:%M",        # 2025-08-19T14:30
+    "%Y-%m-%dT%H:%M:%S.%f",  # 2025-08-19T14:30:00.123
+    "%m/%d/%Y %H:%M:%S",     # 08/19/2025 14:30:00
+    "%m/%d/%Y %H:%M",        # 08/19/2025 14:30
+    "%m/%d/%y %H:%M:%S",     # 8/19/25 14:30:00
+    "%m/%d/%y %H:%M",        # 8/19/25 14:30
+    "%Y/%m/%d %H:%M:%S",     # 2025/08/19 14:30:00
+    "%Y/%m/%d %H:%M",        # 2025/08/19 14:30
+    "%d-%b-%Y %H:%M:%S",     # 19-Aug-2025 14:30:00
+    "%d-%b-%Y %H:%M",        # 19-Aug-2025 14:30
+    # Note: Date-only formats are handled by fallback logic with 9:00 AM default
 ]
 
 
-def parse_date(value: str) -> date:
+def parse_datetime(value: str) -> datetime:
+    """Parse a datetime string, supporting various formats including time of day"""
     last_err: Optional[Exception] = None
     v = value.strip()
-    for fmt in DATE_FORMATS:
+    
+    # Try all datetime formats
+    for fmt in DATETIME_FORMATS:
         try:
-            return datetime.strptime(v, fmt).date()
+            parsed = datetime.strptime(v, fmt)
+            return parsed
         except Exception as e:
             last_err = e
             continue
-    # Try ISO 8601 fallback (handles YYYY-MM-DDTHH:MM:SS)
+    
+    # Try ISO 8601 fallback (handles various ISO formats)
     try:
-        return datetime.fromisoformat(v).date()
+        parsed = datetime.fromisoformat(v)
+        # If it's a date-only format (time is midnight), default to 9:00 AM
+        if parsed.time() == datetime.min.time():
+            return datetime.combine(parsed.date(), time(9, 0, 0))
+        return parsed
     except Exception:
-        raise ValueError(f"Could not parse date: '{value}'. Tried formats: {', '.join(DATE_FORMATS)}") from last_err
+        pass
+    
+    # Try parsing as date-only formats and default to 9:00 AM
+    date_formats = ["%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%d-%b-%Y"]
+    for fmt in date_formats:
+        try:
+            date_only = datetime.strptime(v, fmt).date()
+            return datetime.combine(date_only, time(9, 0, 0))
+        except Exception:
+            continue
+    
+    raise ValueError(f"Could not parse datetime: '{value}'. Supported formats include ISO 8601, YYYY-MM-DD HH:MM:SS, MM/DD/YYYY HH:MM:SS, etc.") from last_err
+
+
+def parse_date(value: str) -> date:
+    """Parse a date string (for backward compatibility)"""
+    return parse_datetime(value).date()
 
 
 def load_entries(csv_path: str) -> List[WeightEntry]:
@@ -62,9 +97,9 @@ def load_entries(csv_path: str) -> List[WeightEntry]:
         for row in reader:
             if not row:
                 continue
-            # Allow optional header; skip if first cell cannot be parsed as date
+            # Allow optional header; skip if first cell cannot be parsed as datetime
             try:
-                d = parse_date(row[0])
+                d = parse_datetime(row[0])
             except Exception:
                 # Probably a header row; skip
                 continue
@@ -78,9 +113,68 @@ def load_entries(csv_path: str) -> List[WeightEntry]:
             except Exception:
                 continue
             entries.append(WeightEntry(d, w))
-    entries.sort(key=lambda e: e.entry_date)
+    entries.sort(key=lambda e: e.entry_datetime)
     return entries
 
+
+def aggregate_entries(entries: List[WeightEntry], window_hours: float) -> List[WeightEntry]:
+    """Aggregate entries within a rolling window into a single mean measurement.
+
+    - Groups consecutive entries such that the span (max_time - min_time) within a group
+      is ≤ window_hours.
+    - The aggregated weight is the arithmetic mean of weights in the group.
+    - The aggregated timestamp is the mean time of the group (by averaging offsets from
+      the first timestamp to avoid timezone-related issues with naive datetimes).
+    - If window_hours <= 0, returns entries unchanged (sorted by time).
+    """
+    if window_hours is None or window_hours <= 0:
+        return sorted(entries, key=lambda e: e.entry_datetime)
+
+    if not entries:
+        return []
+
+    sorted_entries = sorted(entries, key=lambda e: e.entry_datetime)
+    window_seconds = float(window_hours) * 3600.0
+
+    aggregated: List[WeightEntry] = []
+    group: List[WeightEntry] = []
+
+    for entry in sorted_entries:
+        if not group:
+            group = [entry]
+            continue
+        span_seconds = (entry.entry_datetime - group[0].entry_datetime).total_seconds()
+        if span_seconds <= window_seconds:
+            group.append(entry)
+        else:
+            # finalize current group
+            if len(group) == 1:
+                aggregated.append(group[0])
+            else:
+                # mean weight
+                mean_w = float(np.mean([g.weight for g in group]))
+                # mean time via offsets from first timestamp
+                origin = group[0].entry_datetime
+                offsets = [ (g.entry_datetime - origin).total_seconds() for g in group ]
+                mean_offset = float(np.mean(offsets))
+                mean_dt = origin + timedelta(seconds=mean_offset)
+                aggregated.append(WeightEntry(mean_dt, mean_w))
+            # start new group
+            group = [entry]
+
+    # finalize last group
+    if group:
+        if len(group) == 1:
+            aggregated.append(group[0])
+        else:
+            mean_w = float(np.mean([g.weight for g in group]))
+            origin = group[0].entry_datetime
+            offsets = [ (g.entry_datetime - origin).total_seconds() for g in group ]
+            mean_offset = float(np.mean(offsets))
+            mean_dt = origin + timedelta(seconds=mean_offset)
+            aggregated.append(WeightEntry(mean_dt, mean_w))
+
+    return aggregated
 
 def append_entry(csv_path: str, entry: WeightEntry) -> None:
     file_exists = os.path.exists(csv_path)
@@ -116,7 +210,7 @@ def append_entry(csv_path: str, entry: WeightEntry) -> None:
         writer = csv.writer(f)
         if need_header:
             writer.writerow(["date", "weight"])
-        writer.writerow([entry.entry_date.isoformat(), f"{entry.weight:.3f}"])
+        writer.writerow([entry.entry_datetime.isoformat(), f"{entry.weight:.3f}"])
 
 
 # ---------------------------
@@ -136,18 +230,18 @@ def compute_time_aware_ema(entries: List[WeightEntry], span_days: float) -> List
     alpha_per_day = 2.0 / (span_days + 1.0)
     ema_values: List[float] = []
     ema: Optional[float] = None
-    prev_date: Optional[date] = None
+    prev_datetime: Optional[datetime] = None
     for e in entries:
         if ema is None:
             ema = e.weight
         else:
-            delta_days = (e.entry_date - prev_date).days if prev_date else 1
+            delta_days = (e.entry_datetime - prev_datetime).total_seconds() / 86400.0 if prev_datetime else 1
             if delta_days <= 0:
                 delta_days = 1
             eff_alpha = 1.0 - (1.0 - alpha_per_day) ** float(delta_days)
             ema = eff_alpha * e.weight + (1.0 - eff_alpha) * ema
         ema_values.append(float(ema))
-        prev_date = e.entry_date
+        prev_datetime = e.entry_datetime
     return ema_values
 
 
@@ -163,15 +257,15 @@ def fit_time_weighted_linear_regression(entries: List[WeightEntry], half_life_da
     if len(entries) < 2:
         raise ValueError("Need at least 2 data points for regression")
 
-    dates = [e.entry_date for e in entries]
+    datetimes = [e.entry_datetime for e in entries]
     weights_vals = [e.weight for e in entries]
 
-    t0 = dates[0]
-    t = np.array([(d - t0).days for d in dates], dtype=float)
+    t0 = datetimes[0]
+    t = np.array([(d - t0).total_seconds() / 86400.0 for d in datetimes], dtype=float)
     y = np.array(weights_vals, dtype=float)
 
-    most_recent = dates[-1]
-    age_days = np.array([(most_recent - d).days for d in dates], dtype=float)
+    most_recent = datetimes[-1]
+    age_days = np.array([(most_recent - d).total_seconds() / 86400.0 for d in datetimes], dtype=float)
     if half_life_days <= 0:
         # No decay -> equal weights
         w = np.ones_like(age_days)
@@ -200,7 +294,7 @@ def fit_time_weighted_linear_regression(entries: List[WeightEntry], half_life_da
 # Plotting
 # ---------------------------
 
-def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema_curve_values: List[float], slope_per_day: float, intercept: float, output_path: str, no_display: bool = True, start_date: Optional[date] = None, end_date: Optional[date] = None) -> None:
+def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema_curve_values: List[float], slope_per_day: float, intercept: float, output_path: str, no_display: bool = True, start_date: Optional[date] = None, end_date: Optional[date] = None, ci_multiplier: float = 1.96) -> None:
     import matplotlib
     # Use a non-interactive backend only if we are not displaying
     if no_display:
@@ -214,17 +308,20 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
     filtered_entries = entries
     if start_date or end_date:
         if start_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
+            # Convert start_date to datetime at beginning of day
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_datetime]
         if end_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
+            # Convert end_date to datetime at end of day
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_datetime]
         
         if not filtered_entries:
             print(f"Warning: No data in specified date range {start_date} to {end_date}")
             return
     
-    # Use datetimes for smooth plotting
-    from datetime import timedelta
-    dates = [datetime.combine(e.entry_date, datetime.min.time()) for e in filtered_entries]
+    # Use datetimes directly for plotting
+    dates = [e.entry_datetime for e in filtered_entries]
     y = [e.weight for e in filtered_entries]
 
     # Create x values for regression line spanning the visible date range
@@ -235,6 +332,7 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
     min_t, max_t = float(np.min(t_vals)), float(np.max(t_vals))
     t_dense = np.linspace(min_t, max_t, 200)
     y_reg = intercept + slope_per_day * t_dense
+    from datetime import timedelta
     dense_dates = [t0_dt + timedelta(days=float(td)) for td in t_dense]
 
     plt.figure(figsize=(10, 6))
@@ -313,8 +411,8 @@ def compute_ema_and_spline(entries: List[WeightEntry], span_days: float) -> Tupl
     # Compute standard time-aware EMA at entry points (irregular gaps handled)
     ema_at_entries = compute_time_aware_ema(entries, span_days=span_days)
 
-    # Prepare time axis in days from first timestamp, using datetimes
-    entry_datetimes = [datetime.combine(e.entry_date, datetime.min.time()) for e in entries]
+    # Use entry datetimes directly
+    entry_datetimes = [e.entry_datetime for e in entries]
 
     # Collapse duplicate dates by averaging EMA values for that date (ensures strictly increasing x)
     from collections import defaultdict
@@ -385,15 +483,28 @@ def parse_args() -> argparse.Namespace:
                         help="Optional CSV with 'date,lbm' to drive body fat plot via interpolated LBM. Dates like YYYY-MM-DD.")
     parser.add_argument("--start", type=str, help="Start date for plotting (YYYY-MM-DD format). If not specified, shows all data from beginning.")
     parser.add_argument("--end", type=str, help="End date for plotting (YYYY-MM-DD format). If not specified, shows all data to end.")
+    parser.add_argument("--residuals-histogram", action="store_true", help="Generate residuals histogram and normality test")
+    parser.add_argument("--confidence-interval", choices=["1σ", "95%"], default="95%", help="Confidence interval level for all plots and calculations")
+    parser.add_argument("--aggregation-hours", type=float, default=3.0, help="Aggregation window in hours (0 to disable). Default: 3")
     return parser.parse_args()
+
+
+def get_confidence_multiplier(ci_choice: str) -> float:
+    """Convert confidence interval choice to multiplier for standard deviations"""
+    if ci_choice == "1σ":
+        return 1.0
+    elif ci_choice == "95%":
+        return 1.96
+    else:
+        raise ValueError(f"Unknown confidence interval choice: {ci_choice}")
 
 
 def parse_add_arg(s: str) -> WeightEntry:
     try:
-        date_part, weight_part = s.split(":", 1)
+        datetime_part, weight_part = s.split(":", 1)
     except ValueError:
-        raise ValueError("--add must be in the form YYYY-MM-DD:WEIGHT")
-    d = parse_date(date_part.strip())
+        raise ValueError("--add must be in the form YYYY-MM-DD[THH:MM:SS]:WEIGHT")
+    d = parse_datetime(datetime_part.strip())
     try:
         w = float(weight_part.strip())
     except Exception:
@@ -412,6 +523,10 @@ def main() -> None:
         append_entry(csv_path, entry)
 
     entries = load_entries(csv_path)
+    # Apply aggregation window prior to all downstream computations
+    agg_hours = float(args.aggregation_hours) if hasattr(args, 'aggregation_hours') else 3.0
+    if agg_hours > 0:
+        entries = aggregate_entries(entries, agg_hours)
 
     if not entries:
         print("No data found. Use --add YYYY-MM-DD:WEIGHT to add entries or create the CSV.")
@@ -428,8 +543,8 @@ def main() -> None:
     latest = entries[-1]
     latest_ema = ema_values[-1]
     print("=== Weight Trend ===")
-    print(f"Entries: {len(entries)} | Date range: {entries[0].entry_date} to {latest.entry_date}")
-    print(f"Latest weight: {latest.weight:.2f} on {latest.entry_date}")
+    print(f"Entries: {len(entries)} | Date range: {entries[0].entry_datetime} to {latest.entry_datetime}")
+    print(f"Latest weight: {latest.weight:.2f} on {latest.entry_datetime}")
     print(f"7-day EMA: {latest_ema:.2f}")
     print(f"Estimated rate (weighted regression, half-life={args.half_life_days}d):")
     print(f"  per day:  {slope_per_day:+.4f}")
@@ -438,9 +553,9 @@ def main() -> None:
     print(f"Calorie deficit: {slope_per_day*3500:+.3f} calories/day")
 
     if args.print_table:
-        print("\nDate,Weight,EMA")
+        print("\nDateTime,Weight,EMA")
         for e, ema in zip(entries, ema_values):
-            print(f"{e.entry_date},{e.weight:.3f},{ema:.3f}")
+            print(f"{e.entry_datetime},{e.weight:.3f},{ema:.3f}")
 
     # Parse date range arguments
     start_date = None
@@ -458,7 +573,8 @@ def main() -> None:
 
     if ((not args.no_plot) and args.no_kalman_plot):
         try:
-            render_plot(entries, ema_dense_dates, ema_dense_values, slope_per_day, intercept, args.output, no_display=args.no_display, start_date=start_date, end_date=end_date)
+            ci_multiplier = get_confidence_multiplier(args.confidence_interval)
+            render_plot(entries, ema_dense_dates, ema_dense_values, slope_per_day, intercept, args.output, no_display=args.no_display, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier)
             print(f"Plot saved to: {args.output}")
         except Exception as e:
             print(f"Failed to render plot: {e}")
@@ -466,6 +582,7 @@ def main() -> None:
     # Generate Kalman filter plot if requested
     if not args.no_kalman_plot:
         try:
+            ci_multiplier = get_confidence_multiplier(args.confidence_interval)
             # Run Kalman algorithm per mode
             if args.kalman_mode == "smoother":
                 from kalman import run_kalman_smoother
@@ -477,7 +594,7 @@ def main() -> None:
             
             if kalman_states:
                 # Create Kalman filter plot
-                create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date)
+                create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier)
                 print("Kalman plot saved to: weight_trend.png")
                 
                 # Create body fat plot using Kalman smoothing
@@ -494,6 +611,7 @@ def main() -> None:
                         start_date=start_date,
                         end_date=end_date,
                         lbm_csv=args.lbm_csv,
+                        ci_multiplier=ci_multiplier,
                     )
                     print("Body fat plot saved to: bodyfat_trend.png")
                 except Exception as e:
@@ -502,11 +620,11 @@ def main() -> None:
                 # Print Kalman filter summary
                 latest_kalman = kalman_states[-1]
                 print(f"\n=== Kalman Filter Summary ===")
-                print(f"Current weight estimate: {latest_kalman.weight:.2f} ± {1.96 * (latest_kalman.weight_var**0.5):.2f}")
+                print(f"Current weight estimate: {latest_kalman.weight:.2f} ± {ci_multiplier * (latest_kalman.weight_var**0.5):.2f}")
                 
                 # Calculate velocity uncertainty
                 velocity_std = (latest_kalman.velocity_var**0.5)
-                velocity_ci = 1.96 * velocity_std
+                velocity_ci = ci_multiplier * velocity_std
                 velocity_per_week = 7 * latest_kalman.velocity
                 velocity_ci_per_week = 7 * velocity_ci
                 print(f"Current rate: {velocity_per_week:+.3f} ± {velocity_ci_per_week:.3f} lbs/week")
@@ -531,8 +649,28 @@ def main() -> None:
                 week_forecast, week_std = kf.forecast(7.0)
                 month_forecast, month_std = kf.forecast(30.0)
                 
-                print(f"1-week forecast: {week_forecast:.2f} ± {1.96 * week_std:.2f}")
-                print(f"1-month forecast: {month_forecast:.2f} ± {1.96 * month_std:.2f}")
+                print(f"1-week forecast: {week_forecast:.2f} ± {ci_multiplier * week_std:.2f}")
+                print(f"1-month forecast: {month_forecast:.2f} ± {ci_multiplier * month_std:.2f}")
+                
+                # Generate residuals histogram if requested
+                if args.residuals_histogram:
+                    try:
+                        from kalman import compute_residuals, create_residuals_histogram
+                        residuals = compute_residuals(entries, kalman_states, kalman_dates, start_date, end_date)
+                        if residuals:
+                            mean_res, std_res, p_value = create_residuals_histogram(
+                                residuals, 
+                                output_path="residuals_histogram.png",
+                                no_display=args.no_display,
+                                start_date=start_date,
+                                end_date=end_date,
+                                ci_multiplier=ci_multiplier
+                            )
+                            print(f"Residuals histogram saved to: residuals_histogram.png")
+                        else:
+                            print("No residuals data available for histogram")
+                    except Exception as e:
+                        print(f"Failed to generate residuals histogram: {e}")
             else:
                 print("No data available for Kalman filter")
         except Exception as e:

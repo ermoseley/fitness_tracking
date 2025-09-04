@@ -42,8 +42,9 @@ class WeightTrackerGUI:
         self.var_start = tk.StringVar(value="")
         self.var_end = tk.StringVar(value="")
         self.var_kalman_mode = tk.StringVar(value="smoother")
+        self.var_confidence_interval = tk.StringVar(value="95%")
         self.var_show_weight = tk.BooleanVar(value=True)
-        self.var_show_kalman = tk.BooleanVar(value=True)
+        self.var_aggregation_hours = tk.StringVar(value="3")
         self.var_no_display = tk.BooleanVar(value=False)
 
         # Add-entry variables (defaults)
@@ -67,11 +68,11 @@ class WeightTrackerGUI:
         tk.Button(root, text="Browse", command=self._browse_lbm).grid(row=row, column=2, **pad)
 
         row += 1
-        tk.Label(root, text="Start date (YYYY-MM-DD):").grid(row=row, column=0, sticky="e", **pad)
+        tk.Label(root, text="Start date (YYYY-MM-DD[THH:MM:SS]):").grid(row=row, column=0, sticky="e", **pad)
         tk.Entry(root, textvariable=self.var_start, width=20).grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
-        tk.Label(root, text="End date (YYYY-MM-DD):").grid(row=row, column=0, sticky="e", **pad)
+        tk.Label(root, text="End date (YYYY-MM-DD[THH:MM:SS]):").grid(row=row, column=0, sticky="e", **pad)
         tk.Entry(root, textvariable=self.var_end, width=20).grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
@@ -79,13 +80,18 @@ class WeightTrackerGUI:
         tk.OptionMenu(root, self.var_kalman_mode, "smoother", "filter").grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
-        tk.Checkbutton(root, text="Generate Weight Trend (EMA + regression)", variable=self.var_show_weight).grid(row=row, column=1, sticky="w", **pad)
+        tk.Label(root, text="Confidence interval:").grid(row=row, column=0, sticky="e", **pad)
+        tk.OptionMenu(root, self.var_confidence_interval, "95%", "1σ").grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
-        tk.Checkbutton(root, text="Generate Kalman + Body Fat plots", variable=self.var_show_kalman).grid(row=row, column=1, sticky="w", **pad)
+        tk.Label(root, text="Aggregation window (hours):").grid(row=row, column=0, sticky="e", **pad)
+        tk.OptionMenu(root, self.var_aggregation_hours, "3", "6", "12", "24", "0 (off)").grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
-        tk.Checkbutton(root, text="Run headless (no display)", variable=self.var_no_display).grid(row=row, column=1, sticky="w", **pad)
+        tk.Checkbutton(root, text="Save plots as PNG files", variable=self.var_show_weight).grid(row=row, column=1, sticky="w", **pad)
+        
+        row += 1
+        tk.Checkbutton(root, text="Run headless (no python GUI for plots)", variable=self.var_no_display).grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
         tk.Button(root, text="Run", command=self._on_run, width=16).grid(row=row, column=1, sticky="w", **pad)
@@ -94,12 +100,16 @@ class WeightTrackerGUI:
         row += 1
         tk.Button(root, text="Open body fat plot", command=lambda: self._open_file(os.path.join(self.project_dir, "bodyfat_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
 
+        row += 1
+        tk.Button(root, text="Generate Residuals Histogram", command=self._on_residuals_histogram, width=20).grid(row=row, column=1, sticky="w", **pad)
+        tk.Button(root, text="Open residuals plot", command=lambda: self._open_file(os.path.join(self.project_dir, "residuals_histogram.png"))).grid(row=row, column=2, sticky="w", **pad)
+
         # Add entries section
         row += 1
         tk.Label(root, text="Add Weight Entry:").grid(row=row, column=0, sticky="e", **pad)
         weight_frame = tk.Frame(root)
         weight_frame.grid(row=row, column=1, columnspan=2, sticky="w", **pad)
-        tk.Label(weight_frame, text="Date (YYYY-MM-DD):").grid(row=0, column=0, sticky="e", padx=(0, 6))
+        tk.Label(weight_frame, text="DateTime (YYYY-MM-DD[THH:MM:SS]):").grid(row=0, column=0, sticky="e", padx=(0, 6))
         tk.Entry(weight_frame, textvariable=self.var_add_weight_date, width=12).grid(row=0, column=1, sticky="w", padx=(0, 12))
         tk.Label(weight_frame, text="Weight (lb):").grid(row=0, column=2, sticky="e", padx=(0, 6))
         tk.Entry(weight_frame, textvariable=self.var_add_weight_value, width=10).grid(row=0, column=3, sticky="w", padx=(0, 12))
@@ -109,7 +119,7 @@ class WeightTrackerGUI:
         tk.Label(root, text="Add LBM Entry:").grid(row=row, column=0, sticky="e", **pad)
         lbm_frame = tk.Frame(root)
         lbm_frame.grid(row=row, column=1, columnspan=2, sticky="w", **pad)
-        tk.Label(lbm_frame, text="Date (YYYY-MM-DD):").grid(row=0, column=0, sticky="e", padx=(0, 6))
+        tk.Label(lbm_frame, text="DateTime (YYYY-MM-DD[THH:MM:SS]):").grid(row=0, column=0, sticky="e", padx=(0, 6))
         tk.Entry(lbm_frame, textvariable=self.var_add_lbm_date, width=12).grid(row=0, column=1, sticky="w", padx=(0, 12))
         tk.Label(lbm_frame, text="LBM (lb):").grid(row=0, column=2, sticky="e", padx=(0, 6))
         tk.Entry(lbm_frame, textvariable=self.var_add_lbm_value, width=10).grid(row=0, column=3, sticky="w", padx=(0, 12))
@@ -170,10 +180,15 @@ class WeightTrackerGUI:
                 args += ["--end", self.var_end.get().strip()]
             # Mode and toggles
             args += ["--kalman-mode", self.var_kalman_mode.get().strip()]
+            args += ["--confidence-interval", self.var_confidence_interval.get().strip()]
+            # Aggregation window
+            agg = self.var_aggregation_hours.get().strip()
+            if agg == "0 (off)":
+                args += ["--aggregation-hours", "0"]
+            elif agg:
+                args += ["--aggregation-hours", agg]
             if not self.var_show_weight.get():
                 args += ["--no-plot"]
-            if not self.var_show_kalman.get():
-                args += ["--no-kalman-plot"]
             if self.var_no_display.get():
                 args += ["--no-display"]
             return args
@@ -210,11 +225,10 @@ class WeightTrackerGUI:
             if self.var_end.get().strip():
                 sys.argv += ["--end", self.var_end.get().strip()]
             sys.argv += ["--kalman-mode", self.var_kalman_mode.get().strip()]
+            sys.argv += ["--confidence-interval", self.var_confidence_interval.get().strip()]
             
             if not self.var_show_weight.get():
                 sys.argv += ["--no-plot"]
-            if not self.var_show_kalman.get():
-                sys.argv += ["--no-kalman-plot"]
             if self.var_no_display.get():
                 sys.argv += ["--no-display"]
             
@@ -278,9 +292,10 @@ class WeightTrackerGUI:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _validate_iso_date(self, s: str) -> bool:
+    def _validate_datetime(self, s: str) -> bool:
         try:
-            datetime.fromisoformat(s)
+            from weight_tracker import parse_datetime
+            parse_datetime(s)
             return True
         except Exception:
             return False
@@ -288,8 +303,8 @@ class WeightTrackerGUI:
     def _on_add_weight(self) -> None:
         d = self.var_add_weight_date.get().strip()
         w_str = self.var_add_weight_value.get().strip()
-        if not self._validate_iso_date(d):
-            messagebox.showerror("Invalid date", "Please enter a valid date in YYYY-MM-DD format for weight entry.")
+        if not self._validate_datetime(d):
+            messagebox.showerror("Invalid datetime", "Please enter a valid datetime in YYYY-MM-DD[THH:MM:SS] format for weight entry.")
             return
         try:
             float(w_str)
@@ -322,8 +337,8 @@ class WeightTrackerGUI:
     def _on_add_lbm(self) -> None:
         d = self.var_add_lbm_date.get().strip()
         v_str = self.var_add_lbm_value.get().strip()
-        if not self._validate_iso_date(d):
-            messagebox.showerror("Invalid date", "Please enter a valid date in YYYY-MM-DD format for LBM entry.")
+        if not self._validate_datetime(d):
+            messagebox.showerror("Invalid datetime", "Please enter a valid datetime in YYYY-MM-DD[THH:MM:SS] format for LBM entry.")
             return
         try:
             float(v_str)
@@ -356,6 +371,57 @@ class WeightTrackerGUI:
         except Exception as e:
             messagebox.showerror("LBM append failed", str(e))
             self._append_output("LBM append failed: " + str(e))
+
+    def _on_residuals_histogram(self) -> None:
+        """Generate residuals histogram and normality test"""
+        self._append_output("Generating residuals histogram...")
+        
+        def worker() -> None:
+            try:
+                # Build arguments for residuals analysis
+                args = [sys.executable or "python3", os.path.join(self.project_dir, "weight_tracker.py")]
+                
+                # Add CSV arguments
+                if self.var_csv.get().strip():
+                    args += ["--csv", self.var_csv.get().strip()]
+                if self.var_lbm.get().strip():
+                    args += ["--lbm-csv", self.var_lbm.get().strip()]
+                
+                # Add date range arguments
+                if self.var_start.get().strip():
+                    args += ["--start", self.var_start.get().strip()]
+                if self.var_end.get().strip():
+                    args += ["--end", self.var_end.get().strip()]
+                
+                # Add Kalman mode, confidence interval, aggregation, and residuals histogram flag
+                args += ["--kalman-mode", self.var_kalman_mode.get().strip()]
+                args += ["--confidence-interval", self.var_confidence_interval.get().strip()]
+                agg = self.var_aggregation_hours.get().strip()
+                if agg == "0 (off)":
+                    args += ["--aggregation-hours", "0"]
+                elif agg:
+                    args += ["--aggregation-hours", agg]
+                args += ["--residuals-histogram"]
+                args += ["--no-plot"]  # Don't generate the main weight plot
+                args += ["--no-display"]  # Don't display plots
+                
+                self._append_output("Running residuals analysis: " + " ".join(args))
+                
+                proc = subprocess.Popen(args, cwd=self.project_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    self._append_output(line.rstrip())
+                code = proc.wait()
+                
+                if code == 0:
+                    self._append_output("Residuals histogram generated successfully.")
+                else:
+                    self._append_output(f"Failed to generate residuals histogram (exit {code}).")
+                    
+            except Exception as e:
+                self._append_output("Error generating residuals histogram: " + str(e))
+        
+        threading.Thread(target=worker, daemon=True).start()
 
 
 def main() -> None:
