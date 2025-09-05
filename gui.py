@@ -30,10 +30,10 @@ class WeightTrackerGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Weight Tracker")
-        self.root.geometry("1080x880")
+        self.root.geometry("1080x736")
         # Allow both horizontal and vertical resizing
         self.root.resizable(True, True)
-        self.root.minsize(640, 420)
+        self.root.minsize(1080, 604)
         
         # Fix for macOS button responsiveness issues
         self.root.update_idletasks()
@@ -122,14 +122,8 @@ class WeightTrackerGUI:
         tk.Checkbutton(plot_frame, text="FFMI", variable=self.var_show_ffmi_plot).grid(row=0, column=3, sticky="w", padx=(0, 12))
         tk.Checkbutton(plot_frame, text="Residuals histogram", variable=self.var_show_residuals_plot).grid(row=0, column=4, sticky="w")
 
+        row = 3
         row += 1
-        tk.Checkbutton(root, text="Save plots as PNG files", variable=self.var_show_weight).grid(row=row, column=1, sticky="w", **pad)
-        
-        row += 1
-        tk.Checkbutton(root, text="Run headless (no python GUI for plots)", variable=self.var_no_display).grid(row=row, column=1, sticky="w", **pad)
-
-        row += 1
-        tk.Button(root, text="Run", command=self._on_run, width=16).grid(row=row, column=1, sticky="w", **pad)
         tk.Button(root, text="Open weight plot", command=lambda: self._open_file(os.path.join(self.project_dir, "weight_trend.png"))).grid(row=row, column=2, sticky="w", **pad)
 
         row += 1
@@ -143,6 +137,15 @@ class WeightTrackerGUI:
 
         row += 1
         tk.Button(root, text="Open residuals plot", command=lambda: self._open_file(os.path.join(self.project_dir, "residuals_histogram.png"))).grid(row=row, column=2, sticky="w", **pad)
+        
+        row = 8
+        tk.Checkbutton(root, text="Save plots as PNG files", variable=self.var_show_weight).grid(row=row, column=1, sticky="w", **pad)
+        
+        row += 1
+        tk.Checkbutton(root, text="Run headless (no python GUI for plots)", variable=self.var_no_display).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        tk.Button(root, text="Run", command=self._on_run, width=16).grid(row=row, column=1, sticky="w", **pad)
 
         # Add entries section
         row += 1
@@ -198,7 +201,6 @@ class WeightTrackerGUI:
         height_frame.grid_columnconfigure(0, weight=0)  # Height label
         height_frame.grid_columnconfigure(1, weight=0)  # Height entry
         height_frame.grid_columnconfigure(2, weight=0)  # Unit selector
-        tk.Label(height_frame, text="Height:", width=12, anchor="e").grid(row=0, column=0, sticky="e", padx=(0, 6))
         tk.Entry(height_frame, textvariable=self.var_height_value, width=10).grid(row=0, column=1, sticky="w", padx=(0, 6))
         tk.OptionMenu(height_frame, self.var_height_unit, "inches", "cm").grid(row=0, column=2, sticky="w", padx=(6, 0))
         tk.Button(root, text="Update Height", command=self._on_update_height).grid(row=row, column=2, sticky="w", **pad)
