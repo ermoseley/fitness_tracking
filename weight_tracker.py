@@ -392,6 +392,15 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
     ax.text(0.02, 0.02, rate_text, transform=ax.transAxes, ha="left", va="bottom", fontsize=10,
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.85, edgecolor="#cccccc"), zorder=10)
 
+    # Set x-axis limits based on date filtering
+    if start_date or end_date:
+        if start_date:
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            plt.xlim(left=start_datetime)
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            plt.xlim(right=end_datetime)
+
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     if no_display:
@@ -604,7 +613,10 @@ def main() -> None:
     ci_multiplier = get_confidence_multiplier(args.confidence_interval)
     
     # Run Kalman algorithm if any Kalman-dependent plots are requested
+    # Note: We run Kalman if weight plot OR any other Kalman-dependent plots are enabled
+    print(f"DEBUG: Plot flags - no_kalman_plot: {args.no_kalman_plot}, no_bodyfat_plot: {args.no_bodyfat_plot}, no_bmi_plot: {args.no_bmi_plot}, no_ffmi_plot: {args.no_ffmi_plot}")
     if not args.no_kalman_plot or not args.no_bodyfat_plot or not args.no_bmi_plot or not args.no_ffmi_plot:
+        print("DEBUG: Running Kalman algorithm...")
         try:
             # Run Kalman algorithm per mode
             if args.kalman_mode == "smoother":
@@ -614,10 +626,13 @@ def main() -> None:
             else:
                 kalman_states, kalman_dates = run_kalman_filter(entries)
                 plot_label = "Kalman Filter Estimate"
+            print(f"DEBUG: Kalman algorithm completed successfully. States: {len(kalman_states) if kalman_states else 0}")
         except Exception as e:
             print(f"Failed to run Kalman filter: {e}")
             kalman_states = None
             kalman_dates = None
+    else:
+        print("DEBUG: Kalman algorithm not run - no Kalman-dependent plots enabled")
     
     if kalman_states:
         # Create Kalman filter plot (if not disabled)
