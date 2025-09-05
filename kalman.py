@@ -26,6 +26,161 @@ class KalmanState:
     weight_velocity_cov: float  # Covariance between weight and velocity
 
 
+class BodyCompositionKalmanFilter:
+    """
+    Kalman filter specifically designed for body composition metrics (body fat %, FFMI, etc.).
+    
+    Uses more conservative parameters appropriate for percentage-based data.
+    """
+    
+    def __init__(self, 
+                 initial_value: float,
+                 initial_velocity: float = 0.0,
+                 process_noise_value: float = 0.001,  # Much smaller for % data
+                 process_noise_velocity: float = 0.0001,  # Much smaller for % data
+                 process_noise_offdiag: float = 0.0,
+                 measurement_noise: float = 0.1,  # Smaller for % data
+                 initial_value_var: Optional[float] = None,
+                 initial_velocity_var: float = 0.01):  # Smaller for % data
+        """
+        Initialize body composition Kalman filter
+        
+        Args:
+            initial_value: Starting value estimate (e.g., body fat %)
+            initial_velocity: Starting velocity estimate (e.g., % per day)
+            process_noise_value: Process noise for value (variance per day)
+            process_noise_velocity: Process noise for velocity (variance per day)
+            measurement_noise: Measurement noise variance
+        """
+        self.measurement_noise = float(measurement_noise)
+        
+        # Process noise matrix per day (2x2), allow off-diagonal coupling
+        self.Q_day = np.array([
+            [process_noise_value, process_noise_offdiag],
+            [process_noise_offdiag, process_noise_velocity]
+        ], dtype=float)
+        
+        # State vector and covariance matrix (matrix form)
+        self.x = np.array([float(initial_value), float(initial_velocity)], dtype=float)
+        if initial_value_var is None:
+            initial_value_var = float(self.measurement_noise)
+        self.P = np.array([
+            [float(initial_value_var), 0.0],
+            [0.0, float(initial_velocity_var)]
+        ], dtype=float)
+        
+        # Measurement model and noise
+        self.H = np.array([[1.0, 0.0]], dtype=float)
+        self.R = np.array([[self.measurement_noise]], dtype=float)
+        
+        # State transition matrix (constant velocity model)
+        self.F = np.array([
+            [1.0, 1.0],  # value = value + velocity
+            [0.0, 1.0]   # velocity = velocity
+        ], dtype=float)
+        
+        # Identity matrix
+        self.I = np.eye(2, dtype=float)
+    
+    def predict(self, dt_days: float) -> Tuple[float, float]:
+        """
+        Predict state and covariance forward by dt_days
+        
+        Returns:
+            (predicted_value, predicted_std)
+        """
+        # Update state transition matrix for time step
+        F_dt = np.array([
+            [1.0, dt_days],
+            [0.0, 1.0]
+        ], dtype=float)
+        
+        # Predict state
+        self.x = F_dt @ self.x
+        
+        # Predict covariance
+        Q_dt = self.Q_day * dt_days
+        self.P = F_dt @ self.P @ F_dt.T + Q_dt
+        
+        return float(self.x[0].item()), float(np.sqrt(self.P[0, 0]).item())
+    
+    def update(self, measurement: float) -> Tuple[float, float]:
+        """
+        Update state with measurement
+        
+        Returns:
+            (updated_value, updated_std)
+        """
+        # Innovation (measurement residual)
+        y = measurement - (self.H @ self.x)[0]
+        
+        # Innovation covariance
+        S = self.H @ self.P @ self.H.T + self.R
+        
+        # Kalman gain
+        K = self.P @ self.H.T @ np.linalg.inv(S)
+        
+        # Update state
+        self.x = self.x + K.flatten() * y
+        
+        # Update covariance
+        self.P = (self.I - K @ self.H) @ self.P
+        
+        return float(self.x[0].item()), float(np.sqrt(self.P[0, 0]).item())
+    
+    def get_state(self) -> 'KalmanState':
+        """Get current state as KalmanState object"""
+        return KalmanState(
+            weight=float(self.x[0].item()),
+            velocity=float(self.x[1].item()),
+            weight_var=float(self.P[0, 0].item()),
+            velocity_var=float(self.P[1, 1].item()),
+            weight_velocity_cov=float(self.P[0, 1].item())
+        )
+
+
+class BodyCompositionKalman1D:
+    """
+    Simpler and more stable 1D Kalman filter (local level model) for
+    body composition metrics. State is the value itself (no velocity).
+
+    x_{k+1} = x_k + w,   w ~ N(0, q * dt)
+    z_k     = x_k + v,   v ~ N(0, r)
+    """
+
+    def __init__(self,
+                 initial_value: float,
+                 process_noise_per_day: float,
+                 measurement_noise_var: float):
+        self.x = float(initial_value)
+        self.P = float(measurement_noise_var)  # start with measurement variance
+        self.q = float(process_noise_per_day)  # variance growth per day
+        self.r = float(measurement_noise_var)  # measurement variance
+
+    def predict(self, dt_days: float) -> Tuple[float, float]:
+        # Random walk: x stays the same, variance grows with time
+        self.P = self.P + max(dt_days, 0.0) * self.q
+        return float(self.x), float(np.sqrt(max(self.P, 0.0)))
+
+    def update(self, measurement: float) -> Tuple[float, float]:
+        # Standard scalar Kalman update
+        z = float(measurement)
+        S = self.P + self.r
+        K = 0.0 if S <= 0 else self.P / S
+        self.x = self.x + K * (z - self.x)
+        self.P = (1.0 - K) * self.P
+        return float(self.x), float(np.sqrt(max(self.P, 0.0)))
+
+    def get_state(self) -> 'KalmanState':
+        return KalmanState(
+            weight=float(self.x),
+            velocity=0.0,
+            weight_var=float(max(self.P, 0.0)),
+            velocity_var=0.0,
+            weight_velocity_cov=0.0,
+        )
+
+
 class WeightKalmanFilter:
     """
     Kalman filter for weight tracking with position-velocity model.
@@ -173,6 +328,98 @@ class WeightKalmanFilter:
         self.state.velocity_var = float(self.P[1, 1])
         self.state.weight_velocity_cov = float(self.P[0, 1])
         return forecast_weight, forecast_std
+
+
+def run_body_composition_kalman_filter(entries, 
+                                      initial_value: Optional[float] = None,
+                                      initial_velocity: float = 0.0,
+                                      metric_type: str = "body_fat_pct") -> Tuple[List[KalmanState], List[datetime]]:
+    """
+    Run Kalman filter on body composition entries (body fat %, FFMI, etc.)
+    
+    Args:
+        entries: List of WeightEntry objects (using .weight field for the metric value)
+        initial_value: Starting value (defaults to first measurement)
+        initial_velocity: Starting velocity estimate
+        metric_type: Type of metric for parameter tuning ("body_fat_pct", "ffmi", "lbm", "fat_mass")
+        
+    Returns:
+        (kalman_states, dates)
+    """
+    if not entries:
+        return [], []
+    
+    # Initialize filter
+    if initial_value is None:
+        initial_value = entries[0].weight
+    
+    # Use the same algorithm as weight, but scale parameters based on data range
+    # Weight uses: measurement_noise=0.5, process_noise_weight=0.01, process_noise_velocity=0.001, initial_velocity_var=0.25
+    
+    # Calculate scale factor based on typical data range AND responsiveness needs
+    # Body composition changes much more slowly than weight, so use smaller scale factors
+    if metric_type == "body_fat_pct":
+        # Body fat %: 10-25% range, weight: 150-200 lb range
+        # Much less responsive than weight
+        scale_factor = 0.02  # 15% / 175 lb ≈ 0.086, but use 0.02 for less responsiveness
+    elif metric_type == "ffmi":
+        # FFMI: 22-25 range, weight: 150-200 lb range  
+        # Much less responsive than weight
+        scale_factor = 0.03  # 3 / 175 lb ≈ 0.017, but use 0.03 for less responsiveness
+    elif metric_type == "lbm":
+        # LBM: 140-160 lb range, weight: 150-200 lb range
+        # Moderately responsive
+        scale_factor = 0.2  # 20 / 50 lb ≈ 0.4, but use 0.2 for less responsiveness
+    elif metric_type == "fat_mass":
+        # Fat mass: 20-40 lb range, weight: 150-200 lb range
+        # Moderately responsive
+        scale_factor = 0.1  # 20 / 50 lb ≈ 0.4, but use 0.1 for less responsiveness
+    else:
+        scale_factor = 0.02
+
+    # Scale the weight parameters with much more aggressive responsiveness reduction
+    # Make measurement noise much larger and process noise smaller for very smooth, stable filtering
+    process_noise_value = 0.01 * scale_factor * 0.1  # 10x smaller process noise for smoother curves
+    process_noise_velocity = 0.001 * scale_factor * 0.1  # 10x smaller velocity noise
+    measurement_noise = 0.5 * scale_factor * 50  # 50x larger measurement noise for much less responsiveness
+    initial_velocity_var = 0.25 * scale_factor * 0.1  # 10x smaller initial velocity variance
+    
+
+    kf = BodyCompositionKalmanFilter(
+        initial_value=initial_value,
+        initial_velocity=initial_velocity,
+        process_noise_value=process_noise_value,
+        process_noise_velocity=process_noise_velocity,
+        measurement_noise=measurement_noise,
+        initial_velocity_var=initial_velocity_var,
+    )
+    
+    states = []
+    dates = []
+    
+    prev_datetime = None
+    
+    for entry in entries:
+        current_datetime = entry.entry_datetime
+        
+        if prev_datetime is not None:
+            # Time step in days
+            dt_days = (current_datetime - prev_datetime).total_seconds() / 86400.0
+            
+            # Predict forward
+            kf.predict(dt_days)
+        
+        # Update with measurement
+        kf.update(entry.weight)
+        
+        # Store state
+        state = kf.get_state()
+        states.append(state)
+        dates.append(current_datetime)
+        
+        prev_datetime = current_datetime
+    
+    return states, dates
 
 
 def run_kalman_filter(entries, 
@@ -481,20 +728,20 @@ def compute_kalman_mean_std_spline(states, dates) -> Tuple[List[datetime], List[
     max_t = float(np.max(t_entry_days))
     dense_t = np.linspace(min_t, max_t, 5000)
 
-    # Spline the mean and std (natural boundary), with robust fallbacks
+    # Use a monotone shape-preserving spline to avoid overshoot on irregular grids
     try:
-        from scipy.interpolate import CubicSpline  # type: ignore
-        mean_spline = CubicSpline(t_entry_days, mean_vals, bc_type="natural")
-        std_spline = CubicSpline(t_entry_days, std_vals, bc_type="natural")
-        dense_mean = mean_spline(dense_t)
-        dense_std = std_spline(dense_t)
+        from scipy.interpolate import PchipInterpolator  # type: ignore
+        mean_pchip = PchipInterpolator(t_entry_days, mean_vals)
+        std_pchip = PchipInterpolator(t_entry_days, std_vals)
+        dense_mean = mean_pchip(dense_t)
+        dense_std = std_pchip(dense_t)
     except Exception:
         try:
-            from scipy.interpolate import PchipInterpolator  # type: ignore
-            mean_pchip = PchipInterpolator(t_entry_days, mean_vals)
-            std_pchip = PchipInterpolator(t_entry_days, std_vals)
-            dense_mean = mean_pchip(dense_t)
-            dense_std = std_pchip(dense_t)
+            from scipy.interpolate import CubicSpline  # type: ignore
+            mean_spline = CubicSpline(t_entry_days, mean_vals, bc_type="natural")
+            std_spline = CubicSpline(t_entry_days, std_vals, bc_type="natural")
+            dense_mean = mean_spline(dense_t)
+            dense_std = std_spline(dense_t)
         except Exception:
             dense_mean = np.interp(dense_t, t_entry_days, mean_vals)
             dense_std = np.interp(dense_t, t_entry_days, std_vals)
@@ -502,7 +749,9 @@ def compute_kalman_mean_std_spline(states, dates) -> Tuple[List[datetime], List[
     from datetime import timedelta
     dense_datetimes = [t0 + timedelta(days=float(td)) for td in dense_t]
 
-    return dense_datetimes, [float(v) for v in dense_mean], [float(max(float(s), 0.0)) for s in dense_std]
+    # Ensure std non-negative and guard tiny numerical negatives
+    dense_std = [float(max(float(s), 0.0)) for s in dense_std]
+    return dense_datetimes, [float(v) for v in dense_mean], dense_std
 
 
 def _load_fat_mass_csv(path: str) -> List[Tuple[date, float]]:
@@ -860,30 +1109,15 @@ def create_bodyfat_plot_from_calibrated(
         print("Warning: No matching weight data found for body fat measurements")
         return
 
-    # For calibrated data, use direct interpolation instead of Kalman filtering
-    # since the data is already calibrated and smoothed from DEXA calibration
-    from scipy.interpolate import interp1d
-    import numpy as np
+    # Run specialized Kalman filter on body fat percentages
+    bf_states, bf_dates = run_body_composition_kalman_filter(bf_entries, metric_type="body_fat_pct")
+    if not bf_states:
+        print("Warning: Failed to run Kalman filter on body fat data")
+        return
+
+    # Use smoothed Kalman mean and std over a dense date grid
+    dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(bf_states, bf_dates)
     
-    # Create dense time grid
-    start_dt = min(e.entry_datetime for e in bf_entries)
-    end_dt = max(e.entry_datetime for e in bf_entries)
-    total_days = (end_dt - start_dt).total_seconds() / 86400.0
-    num_points = min(5000, max(100, int(total_days * 2)))
-    dense_datetimes = [start_dt + timedelta(days=i * total_days / (num_points - 1)) for i in range(num_points)]
-    
-    # Interpolate body fat percentages
-    bf_times = [(e.entry_datetime - start_dt).total_seconds() / 86400.0 for e in bf_entries]
-    bf_values = [e.weight for e in bf_entries]  # e.weight contains the body fat percentage
-    dense_times = [(dt - start_dt).total_seconds() / 86400.0 for dt in dense_datetimes]
-    
-    # Use linear interpolation
-    interp_func = interp1d(bf_times, bf_values, kind='linear', bounds_error=False, fill_value='extrapolate')
-    dense_means = interp_func(dense_times).tolist()
-    
-    # Estimate uncertainty as a small fraction of the data range
-    data_range = max(bf_values) - min(bf_values)
-    dense_stds = [data_range * 0.05] * len(dense_means)  # 5% of data range as uncertainty
     
     if not dense_datetimes:
         return
@@ -928,9 +1162,9 @@ def create_bodyfat_plot_from_calibrated(
         color="#cccccc", alpha=0.4, label=f"Body Fat {ci_multiplier:.1f}σ CI"
     )
 
-    # Interpolated body fat curve
+    # Kalman-filtered body fat curve
     plt.plot(dense_datetimes, dense_means, "-", color="#1f77b4", linewidth=2.4,
-             label="DEXA-Calibrated Body Fat %")
+             label="DEXA-Calibrated Body Fat % (Kalman)")
 
     # Scatter actual points
     if entry_bf and len(entry_datetimes) == len(entry_bf):
@@ -976,7 +1210,7 @@ def create_bodyfat_plot_from_calibrated(
             bbox=dict(boxstyle='round', facecolor='white',
                      alpha=0.9, edgecolor='#cccccc'), zorder=10)
 
-    plt.title("DEXA-Calibrated Body Fat %")
+    plt.title("DEXA-Calibrated Body Fat % (Kalman Filtered)")
     plt.xlabel("Date")
     plt.ylabel("Body Fat (%)")
     plt.grid(True, alpha=0.3)
@@ -1532,29 +1766,14 @@ def create_ffmi_plot_from_calibrated(
         print("Warning: No matching weight data found for body fat measurements")
         return
 
-    # For calibrated data, use direct interpolation instead of Kalman filtering
-    from scipy.interpolate import interp1d
-    import numpy as np
-    
-    # Create dense time grid
-    start_dt = min(e.entry_datetime for e in ffmi_entries)
-    end_dt = max(e.entry_datetime for e in ffmi_entries)
-    total_days = (end_dt - start_dt).total_seconds() / 86400.0
-    num_points = min(5000, max(100, int(total_days * 2)))
-    dense_datetimes = [start_dt + timedelta(days=i * total_days / (num_points - 1)) for i in range(num_points)]
-    
-    # Interpolate FFMI values
-    ffmi_times = [(e.entry_datetime - start_dt).total_seconds() / 86400.0 for e in ffmi_entries]
-    ffmi_values = [e.weight for e in ffmi_entries]  # e.weight contains the FFMI
-    dense_times = [(dt - start_dt).total_seconds() / 86400.0 for dt in dense_datetimes]
-    
-    # Use linear interpolation
-    interp_func = interp1d(ffmi_times, ffmi_values, kind='linear', bounds_error=False, fill_value='extrapolate')
-    dense_means = interp_func(dense_times).tolist()
-    
-    # Estimate uncertainty as a small fraction of the data range
-    data_range = max(ffmi_values) - min(ffmi_values)
-    dense_stds = [data_range * 0.05] * len(dense_means)  # 5% of data range as uncertainty
+    # Run specialized Kalman filter on FFMI
+    ffmi_states, ffmi_dates = run_body_composition_kalman_filter(ffmi_entries, metric_type="ffmi")
+    if not ffmi_states:
+        print("Warning: Failed to run Kalman filter on FFMI data")
+        return
+
+    # Use smoothed Kalman mean and std over a dense date grid
+    dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(ffmi_states, ffmi_dates)
     if not dense_datetimes:
         return
     
@@ -1646,7 +1865,7 @@ def create_ffmi_plot_from_calibrated(
             bbox=dict(boxstyle='round', facecolor='white',
                      alpha=0.9, edgecolor='#cccccc'), zorder=10)
 
-    plt.title("DEXA-Calibrated Fat-Free Mass Index")
+    plt.title("DEXA-Calibrated Fat-Free Mass Index (Kalman Filtered)")
     plt.xlabel("Date")
     plt.ylabel("FFMI")
     plt.grid(True, alpha=0.3)
@@ -1888,29 +2107,14 @@ def create_lbm_plot_from_calibrated(
         print("Warning: No matching weight data found for body fat measurements")
         return
 
-    # For calibrated data, use direct interpolation instead of Kalman filtering
-    from scipy.interpolate import interp1d
-    import numpy as np
-    
-    # Create dense time grid
-    start_dt = min(e.entry_datetime for e in lbm_entries)
-    end_dt = max(e.entry_datetime for e in lbm_entries)
-    total_days = (end_dt - start_dt).total_seconds() / 86400.0
-    num_points = min(5000, max(100, int(total_days * 2)))
-    dense_datetimes = [start_dt + timedelta(days=i * total_days / (num_points - 1)) for i in range(num_points)]
-    
-    # Interpolate LBM values
-    lbm_times = [(e.entry_datetime - start_dt).total_seconds() / 86400.0 for e in lbm_entries]
-    lbm_values = [e.weight for e in lbm_entries]  # e.weight contains the LBM
-    dense_times = [(dt - start_dt).total_seconds() / 86400.0 for dt in dense_datetimes]
-    
-    # Use linear interpolation
-    interp_func = interp1d(lbm_times, lbm_values, kind='linear', bounds_error=False, fill_value='extrapolate')
-    dense_means = interp_func(dense_times).tolist()
-    
-    # Estimate uncertainty as a small fraction of the data range
-    data_range = max(lbm_values) - min(lbm_values)
-    dense_stds = [data_range * 0.05] * len(dense_means)  # 5% of data range as uncertainty
+    # Run specialized Kalman filter on LBM
+    lbm_states, lbm_dates = run_body_composition_kalman_filter(lbm_entries, metric_type="lbm")
+    if not lbm_states:
+        print("Warning: Failed to run Kalman filter on LBM data")
+        return
+
+    # Use smoothed Kalman mean and std over a dense date grid
+    dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(lbm_states, lbm_dates)
     if not dense_datetimes:
         return
     
@@ -2002,7 +2206,7 @@ def create_lbm_plot_from_calibrated(
             bbox=dict(boxstyle='round', facecolor='white',
                      alpha=0.9, edgecolor='#cccccc'), zorder=10)
 
-    plt.title("DEXA-Calibrated Lean Body Mass")
+    plt.title("DEXA-Calibrated Lean Body Mass (Kalman Filtered)")
     plt.xlabel("Date")
     plt.ylabel("LBM (lb)")
     plt.grid(True, alpha=0.3)
@@ -2197,29 +2401,14 @@ def create_fatmass_plot_from_calibrated(
         print("Warning: No matching weight data found for body fat measurements")
         return
 
-    # For calibrated data, use direct interpolation instead of Kalman filtering
-    from scipy.interpolate import interp1d
-    import numpy as np
-    
-    # Create dense time grid
-    start_dt = min(e.entry_datetime for e in fat_mass_entries)
-    end_dt = max(e.entry_datetime for e in fat_mass_entries)
-    total_days = (end_dt - start_dt).total_seconds() / 86400.0
-    num_points = min(5000, max(100, int(total_days * 2)))
-    dense_datetimes = [start_dt + timedelta(days=i * total_days / (num_points - 1)) for i in range(num_points)]
-    
-    # Interpolate fat mass values
-    fm_times = [(e.entry_datetime - start_dt).total_seconds() / 86400.0 for e in fat_mass_entries]
-    fm_values = [e.weight for e in fat_mass_entries]  # e.weight contains the fat mass
-    dense_times = [(dt - start_dt).total_seconds() / 86400.0 for dt in dense_datetimes]
-    
-    # Use linear interpolation
-    interp_func = interp1d(fm_times, fm_values, kind='linear', bounds_error=False, fill_value='extrapolate')
-    dense_means = interp_func(dense_times).tolist()
-    
-    # Estimate uncertainty as a small fraction of the data range
-    data_range = max(fm_values) - min(fm_values)
-    dense_stds = [data_range * 0.05] * len(dense_means)  # 5% of data range as uncertainty
+    # Run specialized Kalman filter on fat mass
+    fm_states, fm_dates = run_body_composition_kalman_filter(fat_mass_entries, metric_type="fat_mass")
+    if not fm_states:
+        print("Warning: Failed to run Kalman filter on fat mass data")
+        return
+
+    # Use smoothed Kalman mean and std over a dense date grid
+    dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(fm_states, fm_dates)
     if not dense_datetimes:
         return
     
@@ -2311,7 +2500,7 @@ def create_fatmass_plot_from_calibrated(
             bbox=dict(boxstyle='round', facecolor='white',
                      alpha=0.9, edgecolor='#cccccc'), zorder=10)
 
-    plt.title("DEXA-Calibrated Fat Mass")
+    plt.title("DEXA-Calibrated Fat Mass (Kalman Filtered)")
     plt.xlabel("Date")
     plt.ylabel("Fat Mass (lb)")
     plt.grid(True, alpha=0.3)
