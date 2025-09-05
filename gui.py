@@ -285,7 +285,7 @@ class WeightTrackerGUI:
             return []
         else:
             # Running from source - use system Python
-            args: list[str] = ["python3", os.path.join(self.project_dir, "weight_tracker.py")]
+            args: list[str] = [sys.executable or "/opt/anaconda3/bin/python3", os.path.join(self.project_dir, "weight_tracker.py")]
             # Ensure data dir exists
             os.makedirs(self.data_dir, exist_ok=True)
             # CSVs (upload semantics)
@@ -492,7 +492,7 @@ class WeightTrackerGUI:
         os.makedirs(self.data_dir, exist_ok=True)
         weights_target = os.path.join(self.data_dir, "weights.csv")
 
-        args = [sys.executable or "python3", os.path.join(self.project_dir, "weight_tracker.py"),
+        args = [sys.executable or "/opt/anaconda3/bin/python3", os.path.join(self.project_dir, "weight_tracker.py"),
                 "--csv", weights_target, "--add", f"{d}:{w_str}",
                 "--no-plot", "--no-kalman-plot", "--no-display"]
 
