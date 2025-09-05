@@ -394,12 +394,24 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
 
     # Set x-axis limits based on date filtering
     if start_date or end_date:
+        min_datetime = min(ema_filtered_dates) if ema_filtered_dates else None
+        max_datetime = max(ema_filtered_dates) if ema_filtered_dates else None
         if start_date:
             start_datetime = datetime.combine(start_date, datetime.min.time())
             plt.xlim(left=start_datetime)
+        elif min_datetime is not None:
+            plt.xlim(left=min_datetime)
         if end_date:
             end_datetime = datetime.combine(end_date, datetime.max.time())
             plt.xlim(right=end_datetime)
+        elif max_datetime is not None:
+            plt.xlim(right=max_datetime)
+    else:
+        # Default to full data range when no explicit start/end dates are provided
+        if ema_filtered_dates:
+            min_datetime = min(ema_filtered_dates)
+            max_datetime = max(ema_filtered_dates)
+            plt.xlim(left=min_datetime, right=max_datetime)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)

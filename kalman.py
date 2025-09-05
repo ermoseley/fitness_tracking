@@ -560,7 +560,7 @@ def create_kalman_plot(entries,
         dates: List of dates corresponding to states
         output_path: Path to save the plot
     """
-    from datetime import datetime as dt
+    from datetime import datetime as dt, timedelta
     
     if not entries or not states:
         return
@@ -685,13 +685,24 @@ Forecasts:
     
     # Set x-axis limits based on date filtering
     if start_date or end_date:
-        from datetime import datetime as dt
+        min_datetime = min(dates) if dates else None
+        max_datetime = max(dates) if dates else None
         if start_date:
             start_datetime = dt.combine(start_date, dt.min.time())
             plt.xlim(left=start_datetime)
+        elif min_datetime is not None:
+            plt.xlim(left=min_datetime)
         if end_date:
             end_datetime = dt.combine(end_date, dt.max.time())
             plt.xlim(right=end_datetime)
+        elif max_datetime is not None:
+            plt.xlim(right=max_datetime)
+    else:
+        # Default to full data range when no explicit start/end dates are provided
+        if dates:
+            min_datetime = min(dates)
+            max_datetime = max(dates)
+            plt.xlim(left=min_datetime, right=max_datetime)
     
     plt.tight_layout()
     
@@ -1017,13 +1028,24 @@ def create_bodyfat_plot_from_kalman(
     
     # Set x-axis limits based on date filtering
     if start_date or end_date:
-        from datetime import datetime as dt
+        min_datetime = min(dates) if dates else None
+        max_datetime = max(dates) if dates else None
         if start_date:
             start_datetime = dt.combine(start_date, dt.min.time())
             plt.xlim(left=start_datetime)
+        elif min_datetime is not None:
+            plt.xlim(left=min_datetime)
         if end_date:
             end_datetime = dt.combine(end_date, dt.max.time())
             plt.xlim(right=end_datetime)
+        elif max_datetime is not None:
+            plt.xlim(right=max_datetime)
+    else:
+        # Default to full data range when no explicit start/end dates are provided
+        if dates:
+            min_datetime = min(dates)
+            max_datetime = max(dates)
+            plt.xlim(left=min_datetime, right=max_datetime)
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -1053,7 +1075,7 @@ def compute_residuals(entries, states, dates, start_date: Optional[date] = None,
     # Filter entries by date range if specified
     filtered_entries = entries
     if start_date or end_date:
-        from datetime import datetime as dt
+        from datetime import datetime as dt, timedelta
         if start_date:
             # Convert start_date to datetime at beginning of day
             start_datetime = dt.combine(start_date, dt.min.time())
@@ -1108,6 +1130,8 @@ def create_bmi_plot_from_kalman(
     BMI = weight(kg) / height(m)^2
     For imperial units: BMI = (weight_lb / height_in^2) * 703
     """
+    from datetime import datetime as dt, timedelta
+    
     if not entries or not states:
         return
 
@@ -1214,13 +1238,24 @@ def create_bmi_plot_from_kalman(
     
     # Set x-axis limits based on date filtering
     if start_date or end_date:
-        from datetime import datetime as dt
+        min_datetime = min(dates) if dates else None
+        max_datetime = max(dates) if dates else None
         if start_date:
             start_datetime = dt.combine(start_date, dt.min.time())
             plt.xlim(left=start_datetime)
+        elif min_datetime is not None:
+            plt.xlim(left=min_datetime)
         if end_date:
             end_datetime = dt.combine(end_date, dt.max.time())
             plt.xlim(right=end_datetime)
+        elif max_datetime is not None:
+            plt.xlim(right=max_datetime)
+    else:
+        # Default to full data range when no explicit start/end dates are provided
+        if dates:
+            min_datetime = min(dates)
+            max_datetime = max(dates)
+            plt.xlim(left=min_datetime, right=max_datetime)
     
     plt.tight_layout()
 
@@ -1248,6 +1283,8 @@ def create_ffmi_plot_from_kalman(
     FFMI = LBM(kg) / height(m)^2
     For imperial units: FFMI = (LBM_lb / height_in^2) * 703
     """
+    from datetime import datetime as dt, timedelta
+    
     if not entries or not states:
         return
 
@@ -1390,13 +1427,24 @@ def create_ffmi_plot_from_kalman(
     
     # Set x-axis limits based on date filtering
     if start_date or end_date:
-        from datetime import datetime as dt
+        min_datetime = min(dates) if dates else None
+        max_datetime = max(dates) if dates else None
         if start_date:
             start_datetime = dt.combine(start_date, dt.min.time())
             plt.xlim(left=start_datetime)
+        elif min_datetime is not None:
+            plt.xlim(left=min_datetime)
         if end_date:
             end_datetime = dt.combine(end_date, dt.max.time())
             plt.xlim(right=end_datetime)
+        elif max_datetime is not None:
+            plt.xlim(right=max_datetime)
+    else:
+        # Default to full data range when no explicit start/end dates are provided
+        if dates:
+            min_datetime = min(dates)
+            max_datetime = max(dates)
+            plt.xlim(left=min_datetime, right=max_datetime)
     
     plt.tight_layout()
 
