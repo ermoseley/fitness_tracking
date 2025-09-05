@@ -40,6 +40,8 @@ class WeightTrackerGUI:
         self.root.lift()
         self.root.attributes('-topmost', True)
         self.root.after_idle(lambda: self.root.attributes('-topmost', False))
+        # Ensure the window comes to the front shortly after launch
+        self.root.after(300, lambda: self._bring_to_front())
         
         # Note: Avoid global focus/click bindings which can steal focus from inputs on macOS
         
@@ -222,6 +224,11 @@ class WeightTrackerGUI:
         # Simple focus restoration
         self.root.focus_force()
         self.root.lift()
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
 
     def _browse_lbm(self) -> None:
         path = filedialog.askopenfilename(title="Select LBM CSV", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
@@ -230,12 +237,21 @@ class WeightTrackerGUI:
         # Simple focus restoration
         self.root.focus_force()
         self.root.lift()
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
 
     def _append_output(self, text: str) -> None:
         self.output.insert(tk.END, text + "\n")
         self.output.see(tk.END)
         # Force GUI update to prevent button freezing
-        self.root.update_idletasks()
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
     
     def _append_output_safe(self, text: str) -> None:
         """Thread-safe append to output text widget."""
@@ -243,9 +259,26 @@ class WeightTrackerGUI:
     
     def _refresh_gui(self) -> None:
         """Refresh GUI to prevent button freezing issues"""
-        self.root.update_idletasks()
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
         # Less aggressive update
         self.root.after(10, lambda: None)
+
+    def _bring_to_front(self) -> None:
+        """Raise and focus the main window (useful after closing plot windows)."""
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            # Toggle topmost to reliably raise on macOS
+            self.root.attributes('-topmost', True)
+            # Drop topmost shortly after so other apps can go above later
+            self.root.after(200, lambda: self.root.attributes('-topmost', False))
+            self.root.focus_force()
+        except Exception:
+            pass
     
     def _on_focus_in(self, event) -> None:
         """Handle window focus events to ensure responsiveness"""
@@ -279,6 +312,11 @@ class WeightTrackerGUI:
                 subprocess.Popen(["xdg-open", path])
         except Exception as e:
             messagebox.showerror("Open failed", str(e))
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
 
     def _build_args(self) -> list[str]:
         # Check if we're running in a bundled app
@@ -352,6 +390,11 @@ class WeightTrackerGUI:
             # Running from source - use subprocess
             self._append_output("Running: " + " ".join(args))
             self._run_subprocess_weight_tracker(args)
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
 
     def _run_bundled_weight_tracker(self) -> None:
         """Run weight_tracker directly when in bundled mode"""
@@ -434,6 +477,8 @@ class WeightTrackerGUI:
                     self._append_output(f"Error running weight tracker: {e}")
                     import traceback
                     self._append_output(f"Traceback: {traceback.format_exc()}")
+            # Bring GUI to front after closing interactive plot windows
+            self._bring_to_front()
             
             # Restore original argv
             sys.argv = original_argv
@@ -442,6 +487,7 @@ class WeightTrackerGUI:
             self._append_output(f"Error: {e}")
             import traceback
             self._append_output(f"Traceback: {traceback.format_exc()}")
+            self._bring_to_front()
 
     def _run_subprocess_weight_tracker(self, args: list[str]) -> None:
         """Run weight_tracker using subprocess (for development mode)"""
@@ -463,12 +509,29 @@ class WeightTrackerGUI:
                 if code == 0:
                     self._append_output_safe("Done. You can click the buttons to open the generated plots.")
                 # Final GUI refresh
-                self.root.after(1, self._refresh_gui)
+                self.root.after(1, lambda: (self.root.update_idletasks(), self.root.update()))
+                # Raise our window after plot windows are closed
+                self.root.after(200, lambda: (self.root.lift(), self.root.attributes('-topmost', True)))
+                self.root.after(400, lambda: self.root.attributes('-topmost', False))
             except Exception as e:
                 self._append_output_safe("Error: " + str(e))
-                self.root.after(1, self._refresh_gui)
+                self.root.after(1, lambda: (self.root.update_idletasks(), self.root.update()))
+                self.root.after(200, lambda: (self.root.lift(), self.root.attributes('-topmost', True)))
+                self.root.after(400, lambda: self.root.attributes('-topmost', False))
 
         threading.Thread(target=worker, daemon=True).start()
+        # Ensure responsiveness after click
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
+        # Ensure responsiveness after click
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
 
     def _validate_datetime(self, s: str) -> bool:
         try:
@@ -556,6 +619,12 @@ class WeightTrackerGUI:
         except Exception as e:
             messagebox.showerror("LBM append failed", str(e))
             self._append_output_safe("LBM append failed: " + str(e))
+        finally:
+            try:
+                self.root.update_idletasks()
+                self.root.update()
+            except Exception:
+                pass
 
     def _on_add_bf(self) -> None:
         d = self.var_add_bf_date.get().strip()
@@ -686,6 +755,11 @@ class WeightTrackerGUI:
             f.write(f"{height_inches:.3f}")
         
         self._append_output(f"Height updated to {height_value} {unit} ({height_inches:.3f} inches)")
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
 
 
 
