@@ -560,6 +560,8 @@ def create_kalman_plot(entries,
         dates: List of dates corresponding to states
         output_path: Path to save the plot
     """
+    from datetime import datetime as dt, timedelta
+    
     if not entries or not states:
         return
     
@@ -568,11 +570,11 @@ def create_kalman_plot(entries,
     if start_date or end_date:
         if start_date:
             # Convert start_date to datetime at beginning of day
-            start_datetime = datetime.combine(start_date, datetime.min.time())
+            start_datetime = dt.combine(start_date, dt.min.time())
             filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_datetime]
         if end_date:
             # Convert end_date to datetime at end of day
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+            end_datetime = dt.combine(end_date, dt.max.time())
             filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_datetime]
         
         if not filtered_entries:
@@ -600,7 +602,7 @@ def create_kalman_plot(entries,
         dense_means = filtered_dense_means
         dense_stds = filtered_dense_stds
     
-    entry_datetimes = [e.entry_datetime for e in filtered_entries]
+    entry_datetimes = [e.entry_datetime for e in entries]
     
     # Create plot with high-quality settings
     plt.figure(figsize=(12, 8), dpi=100)
@@ -623,8 +625,10 @@ def create_kalman_plot(entries,
              linewidth=2, label=label, 
              antialiased=True, solid_capstyle='round')
     
-    # Plot raw data
-    raw_weights = [e.weight for e in filtered_entries]
+    # Plot raw data (filter to selected date range for display)
+    plotted_entries = filtered_entries if (start_date or end_date) else entries
+    entry_datetimes = [e.entry_datetime for e in plotted_entries]
+    raw_weights = [e.weight for e in plotted_entries]
     plt.scatter(entry_datetimes, raw_weights, s=50, color='blue', 
                 alpha=0.7, label='Raw Measurements', zorder=5)
     
@@ -680,6 +684,50 @@ Forecasts:
     plt.ylabel('Weight (lbs)')
     plt.grid(True, alpha=0.3)
     plt.legend()
+    
+    # Set x-axis limits based on filtered dense curve for a natural view
+    dense_min = min(dense_datetimes) if dense_datetimes else (min(entry_datetimes) if entry_datetimes else None)
+    dense_max = max(dense_datetimes) if dense_datetimes else (max(entry_datetimes) if entry_datetimes else None)
+    if start_date or end_date:
+        left = dt.combine(start_date, dt.min.time()) if start_date else dense_min
+        right = dt.combine(end_date, dt.max.time()) if end_date else dense_max
+    else:
+        left, right = dense_min, dense_max
+    if left is not None and right is not None and left <= right:
+        span = right - left
+        pad = max(span * 0.02, timedelta(days=1))
+        left_pad = left if start_date else (left - pad)
+        right_pad = right if end_date else (right + pad)
+        plt.xlim(left=left_pad, right=right_pad)
+    
+    # After setting x-limits, set Y-limits based on visible series (bands, mean, points)
+    try:
+        y_values: List[float] = []
+        if lower_band and upper_band:
+            y_values.extend([float(v) for v in lower_band])
+            y_values.extend([float(v) for v in upper_band])
+        if dense_means:
+            y_values.extend([float(v) for v in dense_means])
+        if raw_weights:
+            y_values.extend([float(v) for v in raw_weights])
+        if y_values:
+            y_min = float(np.nanmin(np.array(y_values, dtype=float)))
+            y_max = float(np.nanmax(np.array(y_values, dtype=float)))
+            if not np.isfinite(y_min) or not np.isfinite(y_max):
+                raise ValueError("Non-finite y-range")
+            if y_min == y_max:
+                y_pad = 0.5 if y_min == 0 else abs(y_min) * 0.05
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+            else:
+                y_span = y_max - y_min
+                y_pad = max(0.02 * y_span, 0.25)
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+    except Exception:
+        # Fallback to autoscale if anything goes wrong
+        ax = plt.gca()
+        ax.relim()
+        ax.autoscale_view(scalex=False, scaley=True)
+    
     plt.tight_layout()
     
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
@@ -748,17 +796,8 @@ def create_bodyfat_plot_from_kalman(
     if not entries or not states:
         return
 
-    # Filter entries by date range if specified
-    filtered_entries = entries
-    if start_date or end_date:
-        if start_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
-        if end_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
-        
-        if not filtered_entries:
-            print(f"Warning: No data in specified date range {start_date} to {end_date}")
-            return
+    # Note: We don't filter entries here because Kalman algorithm needs full dataset
+    # Date filtering will be applied to the dense grid later
 
     # Use smoothed Kalman mean and std over a dense date grid
     dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(states, dates)
@@ -767,6 +806,10 @@ def create_bodyfat_plot_from_kalman(
     
     # Filter dense curves by date range if specified
     if start_date or end_date:
+        print(f"DEBUG: Filtering dense grid by date range: {start_date} to {end_date}")
+        print(f"DEBUG: Original dense grid has {len(dense_datetimes)} points")
+        print(f"DEBUG: Date range: {dense_datetimes[0].date()} to {dense_datetimes[-1].date()}")
+        
         filtered_dense_datetimes = []
         filtered_dense_means = []
         filtered_dense_stds = []
@@ -779,6 +822,12 @@ def create_bodyfat_plot_from_kalman(
             filtered_dense_datetimes.append(dt)
             filtered_dense_means.append(mean)
             filtered_dense_stds.append(std)
+        
+        print(f"DEBUG: After filtering, dense grid has {len(filtered_dense_datetimes)} points")
+        if not filtered_dense_datetimes:
+            print(f"DEBUG: No data in specified date range after filtering!")
+            return
+            
         dense_datetimes = filtered_dense_datetimes
         dense_means = filtered_dense_means
         dense_stds = filtered_dense_stds
@@ -812,8 +861,8 @@ def create_bodyfat_plot_from_kalman(
         bf_band_upper = [max(a, b) for a, b in zip(bf_mid_lo, bf_mid_hi)]
 
         # Entry points BF from entries and interpolated LBM
-        entry_datetimes = [e.entry_datetime for e in filtered_entries]
-        entry_weights = [float(e.weight) for e in filtered_entries]
+        entry_datetimes = [e.entry_datetime for e in entries]
+        entry_weights = [float(e.weight) for e in entries]
         entry_lbm = _evaluate_lbm_series(entry_datetimes, lbm_points)
         entry_bf_mid = [float(max(0.0, min(100.0, 100.0 * (1.0 - (l / max(1e-6, w))))))
                         for w, l in zip(entry_weights, entry_lbm)]
@@ -851,8 +900,8 @@ def create_bodyfat_plot_from_kalman(
         )
 
         # Scatter points for actual measurements under mid scenario
-        entry_datetimes = [e.entry_datetime for e in filtered_entries]
-        entry_weights = [float(e.weight) for e in filtered_entries]
+        entry_datetimes = [e.entry_datetime for e in entries]
+        entry_weights = [float(e.weight) for e in entries]
         entry_bf_mid = _compute_bodyfat_pct_from_weight(
             entry_weights, entry_datetimes, baseline_weight_lb, baseline_lean_lb, s_mid
         )
@@ -883,8 +932,25 @@ def create_bodyfat_plot_from_kalman(
     plt.plot(dense_datetimes, bf_mid, "-", color="#1f77b4", linewidth=2.4,
              label="Midline (10% lean, 90% fat)")
 
-    # Scatter actual points under mid assumption
-    plt.scatter(entry_datetimes, entry_bf_mid, s=36, color="#1f77b4", alpha=0.8,
+    # Scatter actual points under mid assumption (filter entries for display)
+    if start_date or end_date:
+        ed_filtered_dt = []
+        ed_filtered_bf = []
+        for dt_i, bf_i in zip(entry_datetimes, entry_bf_mid):
+            d = dt_i.date()
+            if start_date and d < start_date:
+                continue
+            if end_date and d > end_date:
+                continue
+            ed_filtered_dt.append(dt_i)
+            ed_filtered_bf.append(bf_i)
+        entry_datetimes_plot = ed_filtered_dt
+        entry_bf_mid_plot = ed_filtered_bf
+    else:
+        entry_datetimes_plot = entry_datetimes
+        entry_bf_mid_plot = entry_bf_mid
+
+    plt.scatter(entry_datetimes_plot, entry_bf_mid_plot, s=36, color="#1f77b4", alpha=0.8,
                 edgecolors="white", linewidths=0.5, zorder=5, label="Mid assumption (measurements)")
 
     # Stats panel: current estimate, rate, and forecasts (1wk, 1mo)
@@ -1000,6 +1066,50 @@ def create_bodyfat_plot_from_kalman(
     plt.ylabel("Body Fat (%)")
     plt.grid(True, alpha=0.3)
     plt.legend()
+    
+    # Set x-axis using filtered dense range with padding so bands stay inside
+    dense_min = min(dense_datetimes) if dense_datetimes else None
+    dense_max = max(dense_datetimes) if dense_datetimes else None
+    if start_date or end_date:
+        left = dt.combine(start_date, dt.min.time()) if start_date else dense_min
+        right = dt.combine(end_date, dt.max.time()) if end_date else dense_max
+    else:
+        left, right = dense_min, dense_max
+    if left is not None and right is not None and left <= right:
+        span = right - left
+        pad = max(span * 0.02, timedelta(days=1))
+        left_pad = left if start_date else (left - pad)
+        right_pad = right if end_date else (right + pad)
+        plt.xlim(left=left_pad, right=right_pad)
+    
+    # After setting x-limits, compute Y-limits from visible series
+    try:
+        y_values: List[float] = []
+        # Confidence band and midline
+        y_values.extend([float(v) for v in bf_band_lower])
+        y_values.extend([float(v) for v in bf_band_upper])
+        y_values.extend([float(v) for v in bf_mid])
+        # Optional scenario bounds
+        if show_scenarios:
+            y_values.extend([float(v) for v in bf_lower_bound])
+            y_values.extend([float(v) for v in bf_upper_bound])
+        # Scatter points
+        y_values.extend([float(v) for v in entry_bf_mid_plot])
+        if y_values:
+            y_min = float(np.nanmin(np.array(y_values, dtype=float)))
+            y_max = float(np.nanmax(np.array(y_values, dtype=float)))
+            if y_min == y_max:
+                y_pad = 0.5 if y_min == 0 else abs(y_min) * 0.05
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+            else:
+                y_span = y_max - y_min
+                y_pad = max(0.02 * y_span, 0.25)
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+    except Exception:
+        ax = plt.gca()
+        ax.relim()
+        ax.autoscale_view(scalex=False, scaley=True)
+
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     if no_display:
@@ -1028,13 +1138,14 @@ def compute_residuals(entries, states, dates, start_date: Optional[date] = None,
     # Filter entries by date range if specified
     filtered_entries = entries
     if start_date or end_date:
+        from datetime import datetime as dt, timedelta
         if start_date:
             # Convert start_date to datetime at beginning of day
-            start_datetime = datetime.combine(start_date, datetime.min.time())
+            start_datetime = dt.combine(start_date, dt.min.time())
             filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_datetime]
         if end_date:
             # Convert end_date to datetime at end of day
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+            end_datetime = dt.combine(end_date, dt.max.time())
             filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_datetime]
         
         if not filtered_entries:
@@ -1082,6 +1193,8 @@ def create_bmi_plot_from_kalman(
     BMI = weight(kg) / height(m)^2
     For imperial units: BMI = (weight_lb / height_in^2) * 703
     """
+    from datetime import datetime as dt, timedelta
+    
     if not entries or not states:
         return
 
@@ -1091,17 +1204,8 @@ def create_bmi_plot_from_kalman(
         print(f"Warning: No height data found at {height_file}. BMI plot cannot be generated.")
         return
 
-    # Filter entries by date range if specified
-    filtered_entries = entries
-    if start_date or end_date:
-        if start_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
-        if end_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
-        
-        if not filtered_entries:
-            print(f"Warning: No data in specified date range {start_date} to {end_date}")
-            return
+    # Note: We don't filter entries here because Kalman algorithm needs full dataset
+    # Date filtering will be applied to the dense grid later
 
     # Use smoothed Kalman mean and std over a dense date grid
     dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(states, dates)
@@ -1110,6 +1214,10 @@ def create_bmi_plot_from_kalman(
     
     # Filter dense curves by date range if specified
     if start_date or end_date:
+        print(f"DEBUG BMI: Filtering dense grid by date range: {start_date} to {end_date}")
+        print(f"DEBUG BMI: Original dense grid has {len(dense_datetimes)} points")
+        print(f"DEBUG BMI: Date range: {dense_datetimes[0].date()} to {dense_datetimes[-1].date()}")
+        
         filtered_dense_datetimes = []
         filtered_dense_means = []
         filtered_dense_stds = []
@@ -1122,6 +1230,12 @@ def create_bmi_plot_from_kalman(
             filtered_dense_datetimes.append(dt)
             filtered_dense_means.append(mean)
             filtered_dense_stds.append(std)
+        
+        print(f"DEBUG BMI: After filtering, dense grid has {len(filtered_dense_datetimes)} points")
+        if not filtered_dense_datetimes:
+            print(f"DEBUG BMI: No data in specified date range after filtering!")
+            return
+            
         dense_datetimes = filtered_dense_datetimes
         dense_means = filtered_dense_means
         dense_stds = filtered_dense_stds
@@ -1141,8 +1255,8 @@ def create_bmi_plot_from_kalman(
     bmi_hi = [(w * 0.453592) / (height_m ** 2) for w in weight_hi]
     
     # Calculate BMI for actual measurements
-    entry_datetimes = [e.entry_datetime for e in filtered_entries]
-    entry_weights = [float(e.weight) for e in filtered_entries]
+    entry_datetimes = [e.entry_datetime for e in entries]
+    entry_weights = [float(e.weight) for e in entries]
     entry_bmi = [(w * 0.453592) / (height_m ** 2) for w in entry_weights]
 
     # Plot
@@ -1166,8 +1280,25 @@ def create_bmi_plot_from_kalman(
     # BMI mean line
     plt.plot(dense_datetimes, bmi_means, "b-", linewidth=2, label="BMI (Kalman smoothed)")
 
-    # Scatter points for actual measurements
-    plt.scatter(entry_datetimes, entry_bmi, color="red", s=30, alpha=0.7, label="BMI (measurements)")
+    # Scatter points for actual measurements (filter for display if date range set)
+    if start_date or end_date:
+        ed_filtered_dt = []
+        ed_filtered_bmi = []
+        for dt_i, bmi_i in zip(entry_datetimes, entry_bmi):
+            d = dt_i.date()
+            if start_date and d < start_date:
+                continue
+            if end_date and d > end_date:
+                continue
+            ed_filtered_dt.append(dt_i)
+            ed_filtered_bmi.append(bmi_i)
+        entry_datetimes_plot = ed_filtered_dt
+        entry_bmi_plot = ed_filtered_bmi
+    else:
+        entry_datetimes_plot = entry_datetimes
+        entry_bmi_plot = entry_bmi
+
+    plt.scatter(entry_datetimes_plot, entry_bmi_plot, color="red", s=30, alpha=0.7, label="BMI (measurements)")
 
     # BMI categories
     plt.axhline(y=18.5, color="green", linestyle="--", alpha=0.7, label="Underweight (18.5)")
@@ -1184,6 +1315,46 @@ def create_bmi_plot_from_kalman(
     plt.gca().xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%Y-%m-%d"))
     plt.gca().xaxis.set_major_locator(plt.matplotlib.dates.MonthLocator(interval=3))
     plt.xticks(rotation=45)
+    
+    # Set x-axis using filtered dense range with padding so bands stay inside
+    dense_min = min(dense_datetimes) if dense_datetimes else None
+    dense_max = max(dense_datetimes) if dense_datetimes else None
+    if start_date or end_date:
+        left = dt.combine(start_date, dt.min.time()) if start_date else dense_min
+        right = dt.combine(end_date, dt.max.time()) if end_date else dense_max
+    else:
+        left, right = dense_min, dense_max
+    if left is not None and right is not None and left <= right:
+        span = right - left
+        pad = max(span * 0.02, timedelta(days=1))
+        left_pad = left if start_date else (left - pad)
+        right_pad = right if end_date else (right + pad)
+        plt.xlim(left=left_pad, right=right_pad)
+    
+    # After setting x-limits, compute Y-limits from visible series
+    try:
+        y_values: List[float] = []
+        # Confidence band and mean line
+        y_values.extend([float(v) for v in bmi_lo])
+        y_values.extend([float(v) for v in bmi_hi])
+        y_values.extend([float(v) for v in bmi_means])
+        # Scatter points
+        y_values.extend([float(v) for v in entry_bmi_plot])
+        if y_values:
+            y_min = float(np.nanmin(np.array(y_values, dtype=float)))
+            y_max = float(np.nanmax(np.array(y_values, dtype=float)))
+            if y_min == y_max:
+                y_pad = 0.5 if y_min == 0 else abs(y_min) * 0.05
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+            else:
+                y_span = y_max - y_min
+                y_pad = max(0.02 * y_span, 0.25)
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+    except Exception:
+        ax = plt.gca()
+        ax.relim()
+        ax.autoscale_view(scalex=False, scaley=True)
+
     plt.tight_layout()
 
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -1210,6 +1381,8 @@ def create_ffmi_plot_from_kalman(
     FFMI = LBM(kg) / height(m)^2
     For imperial units: FFMI = (LBM_lb / height_in^2) * 703
     """
+    from datetime import datetime as dt, timedelta
+    
     if not entries or not states:
         return
 
@@ -1219,17 +1392,8 @@ def create_ffmi_plot_from_kalman(
         print(f"Warning: No height data found at {height_file}. FFMI plot cannot be generated.")
         return
 
-    # Filter entries by date range if specified
-    filtered_entries = entries
-    if start_date or end_date:
-        if start_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date >= start_date]
-        if end_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_date <= end_date]
-        
-        if not filtered_entries:
-            print(f"Warning: No data in specified date range {start_date} to {end_date}")
-            return
+    # Note: We don't filter entries here because Kalman algorithm needs full dataset
+    # Date filtering will be applied to the dense grid later
 
     # Use smoothed Kalman mean and std over a dense date grid
     dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(states, dates)
@@ -1238,6 +1402,10 @@ def create_ffmi_plot_from_kalman(
     
     # Filter dense curves by date range if specified
     if start_date or end_date:
+        print(f"DEBUG FFMI: Filtering dense grid by date range: {start_date} to {end_date}")
+        print(f"DEBUG FFMI: Original dense grid has {len(dense_datetimes)} points")
+        print(f"DEBUG FFMI: Date range: {dense_datetimes[0].date()} to {dense_datetimes[-1].date()}")
+        
         filtered_dense_datetimes = []
         filtered_dense_means = []
         filtered_dense_stds = []
@@ -1250,6 +1418,12 @@ def create_ffmi_plot_from_kalman(
             filtered_dense_datetimes.append(dt)
             filtered_dense_means.append(mean)
             filtered_dense_stds.append(std)
+        
+        print(f"DEBUG FFMI: After filtering, dense grid has {len(filtered_dense_datetimes)} points")
+        if not filtered_dense_datetimes:
+            print(f"DEBUG FFMI: No data in specified date range after filtering!")
+            return
+            
         dense_datetimes = filtered_dense_datetimes
         dense_means = filtered_dense_means
         dense_stds = filtered_dense_stds
@@ -1284,8 +1458,8 @@ def create_ffmi_plot_from_kalman(
         ffmi_hi = [(lbm * 0.453592) / (height_m ** 2) for lbm in lbm_hi]
         
         # Calculate FFMI for actual measurements
-        entry_datetimes = [e.entry_datetime for e in filtered_entries]
-        entry_weights = [float(e.weight) for e in filtered_entries]
+        entry_datetimes = [e.entry_datetime for e in entries]
+        entry_weights = [float(e.weight) for e in entries]
         entry_lbm = _evaluate_lbm_series(entry_datetimes, lbm_points)
         entry_ffmi = [(lbm * 0.453592) / (height_m ** 2) for lbm in entry_lbm]
     else:
@@ -1303,8 +1477,8 @@ def create_ffmi_plot_from_kalman(
         ffmi_hi = [(lbm * 0.453592) / (height_m ** 2) for lbm in lbm_hi]
         
         # Calculate FFMI for actual measurements
-        entry_datetimes = [e.entry_datetime for e in filtered_entries]
-        entry_weights = [float(e.weight) for e in filtered_entries]
+        entry_datetimes = [e.entry_datetime for e in entries]
+        entry_weights = [float(e.weight) for e in entries]
         entry_lbm = [w * (1.0 - estimated_bf) for w in entry_weights]
         entry_ffmi = [(lbm * 0.453592) / (height_m ** 2) for lbm in entry_lbm]
 
@@ -1329,8 +1503,25 @@ def create_ffmi_plot_from_kalman(
     # FFMI mean line
     plt.plot(dense_datetimes, ffmi_means, "b-", linewidth=2, label="FFMI (Kalman smoothed)")
 
-    # Scatter points for actual measurements
-    plt.scatter(entry_datetimes, entry_ffmi, color="red", s=30, alpha=0.7, label="FFMI (measurements)")
+    # Scatter points for actual measurements (filter for display if date range set)
+    if start_date or end_date:
+        ed_filtered_dt = []
+        ed_filtered_ffmi = []
+        for dt_i, ffmi_i in zip(entry_datetimes, entry_ffmi):
+            d = dt_i.date()
+            if start_date and d < start_date:
+                continue
+            if end_date and d > end_date:
+                continue
+            ed_filtered_dt.append(dt_i)
+            ed_filtered_ffmi.append(ffmi_i)
+        entry_datetimes_plot = ed_filtered_dt
+        entry_ffmi_plot = ed_filtered_ffmi
+    else:
+        entry_datetimes_plot = entry_datetimes
+        entry_ffmi_plot = entry_ffmi
+
+    plt.scatter(entry_datetimes_plot, entry_ffmi_plot, color="red", s=30, alpha=0.7, label="FFMI (measurements)")
 
     # FFMI reference lines (typical ranges for men)
     plt.axhline(y=16.0, color="red", linestyle="--", alpha=0.7, label="Below average (16.0)")
@@ -1348,6 +1539,52 @@ def create_ffmi_plot_from_kalman(
     plt.gca().xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%Y-%m-%d"))
     plt.gca().xaxis.set_major_locator(plt.matplotlib.dates.MonthLocator(interval=3))
     plt.xticks(rotation=45)
+    
+    # Set x-axis limits based on date filtering
+    if start_date or end_date:
+        min_datetime = min(dates) if dates else None
+        max_datetime = max(dates) if dates else None
+        if start_date:
+            start_datetime = dt.combine(start_date, dt.min.time())
+            plt.xlim(left=start_datetime)
+        elif min_datetime is not None:
+            plt.xlim(left=min_datetime)
+        if end_date:
+            end_datetime = dt.combine(end_date, dt.max.time())
+            plt.xlim(right=end_datetime)
+        elif max_datetime is not None:
+            plt.xlim(right=max_datetime)
+    else:
+        # Default to full data range when no explicit start/end dates are provided
+        if dates:
+            min_datetime = min(dates)
+            max_datetime = max(dates)
+            plt.xlim(left=min_datetime, right=max_datetime)
+    
+    # After setting x-limits, compute Y-limits from visible series
+    try:
+        y_values: List[float] = []
+        # Confidence band and mean line
+        y_values.extend([float(v) for v in ffmi_lo])
+        y_values.extend([float(v) for v in ffmi_hi])
+        y_values.extend([float(v) for v in ffmi_means])
+        # Scatter points
+        y_values.extend([float(v) for v in entry_ffmi_plot])
+        if y_values:
+            y_min = float(np.nanmin(np.array(y_values, dtype=float)))
+            y_max = float(np.nanmax(np.array(y_values, dtype=float)))
+            if y_min == y_max:
+                y_pad = 0.5 if y_min == 0 else abs(y_min) * 0.05
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+            else:
+                y_span = y_max - y_min
+                y_pad = max(0.02 * y_span, 0.25)
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+    except Exception:
+        ax = plt.gca()
+        ax.relim()
+        ax.autoscale_view(scalex=False, scaley=True)
+
     plt.tight_layout()
 
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
