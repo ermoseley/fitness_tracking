@@ -625,8 +625,10 @@ def create_kalman_plot(entries,
              linewidth=2, label=label, 
              antialiased=True, solid_capstyle='round')
     
-    # Plot raw data
-    raw_weights = [e.weight for e in entries]
+    # Plot raw data (filter to selected date range for display)
+    plotted_entries = filtered_entries if (start_date or end_date) else entries
+    entry_datetimes = [e.entry_datetime for e in plotted_entries]
+    raw_weights = [e.weight for e in plotted_entries]
     plt.scatter(entry_datetimes, raw_weights, s=50, color='blue', 
                 alpha=0.7, label='Raw Measurements', zorder=5)
     
@@ -683,26 +685,48 @@ Forecasts:
     plt.grid(True, alpha=0.3)
     plt.legend()
     
-    # Set x-axis limits based on date filtering
+    # Set x-axis limits based on filtered dense curve for a natural view
+    dense_min = min(dense_datetimes) if dense_datetimes else (min(entry_datetimes) if entry_datetimes else None)
+    dense_max = max(dense_datetimes) if dense_datetimes else (max(entry_datetimes) if entry_datetimes else None)
     if start_date or end_date:
-        min_datetime = min(dates) if dates else None
-        max_datetime = max(dates) if dates else None
-        if start_date:
-            start_datetime = dt.combine(start_date, dt.min.time())
-            plt.xlim(left=start_datetime)
-        elif min_datetime is not None:
-            plt.xlim(left=min_datetime)
-        if end_date:
-            end_datetime = dt.combine(end_date, dt.max.time())
-            plt.xlim(right=end_datetime)
-        elif max_datetime is not None:
-            plt.xlim(right=max_datetime)
+        left = dt.combine(start_date, dt.min.time()) if start_date else dense_min
+        right = dt.combine(end_date, dt.max.time()) if end_date else dense_max
     else:
-        # Default to full data range when no explicit start/end dates are provided
-        if dates:
-            min_datetime = min(dates)
-            max_datetime = max(dates)
-            plt.xlim(left=min_datetime, right=max_datetime)
+        left, right = dense_min, dense_max
+    if left is not None and right is not None and left <= right:
+        span = right - left
+        pad = max(span * 0.02, timedelta(days=1))
+        left_pad = left if start_date else (left - pad)
+        right_pad = right if end_date else (right + pad)
+        plt.xlim(left=left_pad, right=right_pad)
+    
+    # After setting x-limits, set Y-limits based on visible series (bands, mean, points)
+    try:
+        y_values: List[float] = []
+        if lower_band and upper_band:
+            y_values.extend([float(v) for v in lower_band])
+            y_values.extend([float(v) for v in upper_band])
+        if dense_means:
+            y_values.extend([float(v) for v in dense_means])
+        if raw_weights:
+            y_values.extend([float(v) for v in raw_weights])
+        if y_values:
+            y_min = float(np.nanmin(np.array(y_values, dtype=float)))
+            y_max = float(np.nanmax(np.array(y_values, dtype=float)))
+            if not np.isfinite(y_min) or not np.isfinite(y_max):
+                raise ValueError("Non-finite y-range")
+            if y_min == y_max:
+                y_pad = 0.5 if y_min == 0 else abs(y_min) * 0.05
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+            else:
+                y_span = y_max - y_min
+                y_pad = max(0.02 * y_span, 0.25)
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+    except Exception:
+        # Fallback to autoscale if anything goes wrong
+        ax = plt.gca()
+        ax.relim()
+        ax.autoscale_view(scalex=False, scaley=True)
     
     plt.tight_layout()
     
@@ -908,8 +932,25 @@ def create_bodyfat_plot_from_kalman(
     plt.plot(dense_datetimes, bf_mid, "-", color="#1f77b4", linewidth=2.4,
              label="Midline (10% lean, 90% fat)")
 
-    # Scatter actual points under mid assumption
-    plt.scatter(entry_datetimes, entry_bf_mid, s=36, color="#1f77b4", alpha=0.8,
+    # Scatter actual points under mid assumption (filter entries for display)
+    if start_date or end_date:
+        ed_filtered_dt = []
+        ed_filtered_bf = []
+        for dt_i, bf_i in zip(entry_datetimes, entry_bf_mid):
+            d = dt_i.date()
+            if start_date and d < start_date:
+                continue
+            if end_date and d > end_date:
+                continue
+            ed_filtered_dt.append(dt_i)
+            ed_filtered_bf.append(bf_i)
+        entry_datetimes_plot = ed_filtered_dt
+        entry_bf_mid_plot = ed_filtered_bf
+    else:
+        entry_datetimes_plot = entry_datetimes
+        entry_bf_mid_plot = entry_bf_mid
+
+    plt.scatter(entry_datetimes_plot, entry_bf_mid_plot, s=36, color="#1f77b4", alpha=0.8,
                 edgecolors="white", linewidths=0.5, zorder=5, label="Mid assumption (measurements)")
 
     # Stats panel: current estimate, rate, and forecasts (1wk, 1mo)
@@ -1026,27 +1067,49 @@ def create_bodyfat_plot_from_kalman(
     plt.grid(True, alpha=0.3)
     plt.legend()
     
-    # Set x-axis limits based on date filtering
+    # Set x-axis using filtered dense range with padding so bands stay inside
+    dense_min = min(dense_datetimes) if dense_datetimes else None
+    dense_max = max(dense_datetimes) if dense_datetimes else None
     if start_date or end_date:
-        min_datetime = min(dates) if dates else None
-        max_datetime = max(dates) if dates else None
-        if start_date:
-            start_datetime = dt.combine(start_date, dt.min.time())
-            plt.xlim(left=start_datetime)
-        elif min_datetime is not None:
-            plt.xlim(left=min_datetime)
-        if end_date:
-            end_datetime = dt.combine(end_date, dt.max.time())
-            plt.xlim(right=end_datetime)
-        elif max_datetime is not None:
-            plt.xlim(right=max_datetime)
+        left = dt.combine(start_date, dt.min.time()) if start_date else dense_min
+        right = dt.combine(end_date, dt.max.time()) if end_date else dense_max
     else:
-        # Default to full data range when no explicit start/end dates are provided
-        if dates:
-            min_datetime = min(dates)
-            max_datetime = max(dates)
-            plt.xlim(left=min_datetime, right=max_datetime)
+        left, right = dense_min, dense_max
+    if left is not None and right is not None and left <= right:
+        span = right - left
+        pad = max(span * 0.02, timedelta(days=1))
+        left_pad = left if start_date else (left - pad)
+        right_pad = right if end_date else (right + pad)
+        plt.xlim(left=left_pad, right=right_pad)
     
+    # After setting x-limits, compute Y-limits from visible series
+    try:
+        y_values: List[float] = []
+        # Confidence band and midline
+        y_values.extend([float(v) for v in bf_band_lower])
+        y_values.extend([float(v) for v in bf_band_upper])
+        y_values.extend([float(v) for v in bf_mid])
+        # Optional scenario bounds
+        if show_scenarios:
+            y_values.extend([float(v) for v in bf_lower_bound])
+            y_values.extend([float(v) for v in bf_upper_bound])
+        # Scatter points
+        y_values.extend([float(v) for v in entry_bf_mid_plot])
+        if y_values:
+            y_min = float(np.nanmin(np.array(y_values, dtype=float)))
+            y_max = float(np.nanmax(np.array(y_values, dtype=float)))
+            if y_min == y_max:
+                y_pad = 0.5 if y_min == 0 else abs(y_min) * 0.05
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+            else:
+                y_span = y_max - y_min
+                y_pad = max(0.02 * y_span, 0.25)
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+    except Exception:
+        ax = plt.gca()
+        ax.relim()
+        ax.autoscale_view(scalex=False, scaley=True)
+
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     if no_display:
@@ -1217,8 +1280,25 @@ def create_bmi_plot_from_kalman(
     # BMI mean line
     plt.plot(dense_datetimes, bmi_means, "b-", linewidth=2, label="BMI (Kalman smoothed)")
 
-    # Scatter points for actual measurements
-    plt.scatter(entry_datetimes, entry_bmi, color="red", s=30, alpha=0.7, label="BMI (measurements)")
+    # Scatter points for actual measurements (filter for display if date range set)
+    if start_date or end_date:
+        ed_filtered_dt = []
+        ed_filtered_bmi = []
+        for dt_i, bmi_i in zip(entry_datetimes, entry_bmi):
+            d = dt_i.date()
+            if start_date and d < start_date:
+                continue
+            if end_date and d > end_date:
+                continue
+            ed_filtered_dt.append(dt_i)
+            ed_filtered_bmi.append(bmi_i)
+        entry_datetimes_plot = ed_filtered_dt
+        entry_bmi_plot = ed_filtered_bmi
+    else:
+        entry_datetimes_plot = entry_datetimes
+        entry_bmi_plot = entry_bmi
+
+    plt.scatter(entry_datetimes_plot, entry_bmi_plot, color="red", s=30, alpha=0.7, label="BMI (measurements)")
 
     # BMI categories
     plt.axhline(y=18.5, color="green", linestyle="--", alpha=0.7, label="Underweight (18.5)")
@@ -1236,27 +1316,45 @@ def create_bmi_plot_from_kalman(
     plt.gca().xaxis.set_major_locator(plt.matplotlib.dates.MonthLocator(interval=3))
     plt.xticks(rotation=45)
     
-    # Set x-axis limits based on date filtering
+    # Set x-axis using filtered dense range with padding so bands stay inside
+    dense_min = min(dense_datetimes) if dense_datetimes else None
+    dense_max = max(dense_datetimes) if dense_datetimes else None
     if start_date or end_date:
-        min_datetime = min(dates) if dates else None
-        max_datetime = max(dates) if dates else None
-        if start_date:
-            start_datetime = dt.combine(start_date, dt.min.time())
-            plt.xlim(left=start_datetime)
-        elif min_datetime is not None:
-            plt.xlim(left=min_datetime)
-        if end_date:
-            end_datetime = dt.combine(end_date, dt.max.time())
-            plt.xlim(right=end_datetime)
-        elif max_datetime is not None:
-            plt.xlim(right=max_datetime)
+        left = dt.combine(start_date, dt.min.time()) if start_date else dense_min
+        right = dt.combine(end_date, dt.max.time()) if end_date else dense_max
     else:
-        # Default to full data range when no explicit start/end dates are provided
-        if dates:
-            min_datetime = min(dates)
-            max_datetime = max(dates)
-            plt.xlim(left=min_datetime, right=max_datetime)
+        left, right = dense_min, dense_max
+    if left is not None and right is not None and left <= right:
+        span = right - left
+        pad = max(span * 0.02, timedelta(days=1))
+        left_pad = left if start_date else (left - pad)
+        right_pad = right if end_date else (right + pad)
+        plt.xlim(left=left_pad, right=right_pad)
     
+    # After setting x-limits, compute Y-limits from visible series
+    try:
+        y_values: List[float] = []
+        # Confidence band and mean line
+        y_values.extend([float(v) for v in bmi_lo])
+        y_values.extend([float(v) for v in bmi_hi])
+        y_values.extend([float(v) for v in bmi_means])
+        # Scatter points
+        y_values.extend([float(v) for v in entry_bmi_plot])
+        if y_values:
+            y_min = float(np.nanmin(np.array(y_values, dtype=float)))
+            y_max = float(np.nanmax(np.array(y_values, dtype=float)))
+            if y_min == y_max:
+                y_pad = 0.5 if y_min == 0 else abs(y_min) * 0.05
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+            else:
+                y_span = y_max - y_min
+                y_pad = max(0.02 * y_span, 0.25)
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+    except Exception:
+        ax = plt.gca()
+        ax.relim()
+        ax.autoscale_view(scalex=False, scaley=True)
+
     plt.tight_layout()
 
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -1405,8 +1503,25 @@ def create_ffmi_plot_from_kalman(
     # FFMI mean line
     plt.plot(dense_datetimes, ffmi_means, "b-", linewidth=2, label="FFMI (Kalman smoothed)")
 
-    # Scatter points for actual measurements
-    plt.scatter(entry_datetimes, entry_ffmi, color="red", s=30, alpha=0.7, label="FFMI (measurements)")
+    # Scatter points for actual measurements (filter for display if date range set)
+    if start_date or end_date:
+        ed_filtered_dt = []
+        ed_filtered_ffmi = []
+        for dt_i, ffmi_i in zip(entry_datetimes, entry_ffmi):
+            d = dt_i.date()
+            if start_date and d < start_date:
+                continue
+            if end_date and d > end_date:
+                continue
+            ed_filtered_dt.append(dt_i)
+            ed_filtered_ffmi.append(ffmi_i)
+        entry_datetimes_plot = ed_filtered_dt
+        entry_ffmi_plot = ed_filtered_ffmi
+    else:
+        entry_datetimes_plot = entry_datetimes
+        entry_ffmi_plot = entry_ffmi
+
+    plt.scatter(entry_datetimes_plot, entry_ffmi_plot, color="red", s=30, alpha=0.7, label="FFMI (measurements)")
 
     # FFMI reference lines (typical ranges for men)
     plt.axhline(y=16.0, color="red", linestyle="--", alpha=0.7, label="Below average (16.0)")
@@ -1446,6 +1561,30 @@ def create_ffmi_plot_from_kalman(
             max_datetime = max(dates)
             plt.xlim(left=min_datetime, right=max_datetime)
     
+    # After setting x-limits, compute Y-limits from visible series
+    try:
+        y_values: List[float] = []
+        # Confidence band and mean line
+        y_values.extend([float(v) for v in ffmi_lo])
+        y_values.extend([float(v) for v in ffmi_hi])
+        y_values.extend([float(v) for v in ffmi_means])
+        # Scatter points
+        y_values.extend([float(v) for v in entry_ffmi_plot])
+        if y_values:
+            y_min = float(np.nanmin(np.array(y_values, dtype=float)))
+            y_max = float(np.nanmax(np.array(y_values, dtype=float)))
+            if y_min == y_max:
+                y_pad = 0.5 if y_min == 0 else abs(y_min) * 0.05
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+            else:
+                y_span = y_max - y_min
+                y_pad = max(0.02 * y_span, 0.25)
+                plt.ylim(y_min - y_pad, y_max + y_pad)
+    except Exception:
+        ax = plt.gca()
+        ax.relim()
+        ax.autoscale_view(scalex=False, scaley=True)
+
     plt.tight_layout()
 
     plt.savefig(output_path, dpi=150, bbox_inches="tight")

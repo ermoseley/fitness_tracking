@@ -375,9 +375,22 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
         ema_filtered_dates = ema_curve_dates
         ema_filtered_values = ema_curve_values
     
-    # EMA curve and regression line
+    # EMA curve and regression line (filter regression to visible date range if needed)
     plt.plot(ema_filtered_dates, ema_filtered_values, "-", label="7-day EMA (spline)", color="#ff7f0e", linewidth=2, zorder=2)
-    plt.plot(dense_dates, y_reg, "--", label="Weighted regression", color="#000000", linewidth=2, zorder=1)
+    if start_date or end_date:
+        dense_filtered_dates = []
+        dense_filtered_y = []
+        for d, y in zip(dense_dates, y_reg):
+            d_date = d.date()
+            if start_date and d_date < start_date:
+                continue
+            if end_date and d_date > end_date:
+                continue
+            dense_filtered_dates.append(d)
+            dense_filtered_y.append(y)
+        plt.plot(dense_filtered_dates, dense_filtered_y, "--", label="Weighted regression", color="#000000", linewidth=2, zorder=1)
+    else:
+        plt.plot(dense_dates, y_reg, "--", label="Weighted regression", color="#000000", linewidth=2, zorder=1)
 
     plt.title("Weight Trend")
     plt.xlabel("Date")
@@ -393,25 +406,26 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.85, edgecolor="#cccccc"), zorder=10)
 
     # Set x-axis limits based on date filtering
+    # Set x-axis using filtered dense range with padding so bands stay inside
+    dense_min = min(dense_filtered_dates) if (start_date or end_date) and 'dense_filtered_dates' in locals() and dense_filtered_dates else (min(dense_dates) if dense_dates else (min(ema_filtered_dates) if ema_filtered_dates else None))
+    dense_max = max(dense_filtered_dates) if (start_date or end_date) and 'dense_filtered_dates' in locals() and dense_filtered_dates else (max(dense_dates) if dense_dates else (max(ema_filtered_dates) if ema_filtered_dates else None))
     if start_date or end_date:
-        min_datetime = min(ema_filtered_dates) if ema_filtered_dates else None
-        max_datetime = max(ema_filtered_dates) if ema_filtered_dates else None
-        if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            plt.xlim(left=start_datetime)
-        elif min_datetime is not None:
-            plt.xlim(left=min_datetime)
-        if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            plt.xlim(right=end_datetime)
-        elif max_datetime is not None:
-            plt.xlim(right=max_datetime)
+        left = datetime.combine(start_date, datetime.min.time()) if start_date else dense_min
+        right = datetime.combine(end_date, datetime.max.time()) if end_date else dense_max
     else:
-        # Default to full data range when no explicit start/end dates are provided
-        if ema_filtered_dates:
-            min_datetime = min(ema_filtered_dates)
-            max_datetime = max(ema_filtered_dates)
-            plt.xlim(left=min_datetime, right=max_datetime)
+        left, right = dense_min, dense_max
+    if left is not None and right is not None and left <= right:
+        span = right - left
+        from datetime import timedelta as _td
+        pad = max(span * 0.02, _td(days=1))
+        left_pad = left if start_date else (left - pad)
+        right_pad = right if end_date else (right + pad)
+        plt.xlim(left=left_pad, right=right_pad)
+
+    # Autoscale Y after x-limits to fit visible data
+    ax = plt.gca()
+    ax.relim()
+    ax.autoscale_view(scalex=False, scaley=True)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
