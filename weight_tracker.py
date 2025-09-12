@@ -299,7 +299,7 @@ def fit_time_weighted_linear_regression(entries: List[WeightEntry], half_life_da
 # Plotting
 # ---------------------------
 
-def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema_curve_values: List[float], slope_per_day: float, intercept: float, output_path: str, no_display: bool = True, start_date: Optional[date] = None, end_date: Optional[date] = None, ci_multiplier: float = 1.96) -> None:
+def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema_curve_values: List[float], slope_per_day: float, intercept: float, output_path: str, no_display: bool = True, start_date: Optional[date] = None, end_date: Optional[date] = None, ci_multiplier: float = 1.96, enable_forecast: bool = True) -> None:
     import matplotlib
     # Use a non-interactive backend only if we are not displaying
     if no_display:
@@ -391,6 +391,42 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
         plt.plot(dense_filtered_dates, dense_filtered_y, "--", label="Weighted regression", color="#000000", linewidth=2, zorder=1)
     else:
         plt.plot(dense_dates, y_reg, "--", label="Weighted regression", color="#000000", linewidth=2, zorder=1)
+
+    # Add forecasting fan if enabled
+    if enable_forecast and not (start_date or end_date):  # Only show forecast when not filtering by date
+        # Calculate forecast parameters
+        last_date = max(dates)
+        last_weight = y[-1]
+        
+        # Calculate historical variance for uncertainty estimation
+        if len(y) > 1:
+            # Use the variance of the last 30 days or all data if less than 30 days
+            recent_entries = y[-min(30, len(y)):]
+            historical_std = np.std(recent_entries)
+        else:
+            historical_std = 0.5  # Default uncertainty
+        
+        # Create forecast dates (1 month = 30 days)
+        forecast_days = 30
+        forecast_dates = [last_date + timedelta(days=i) for i in range(1, forecast_days + 1)]
+        
+        # Calculate forecast values using linear trend
+        forecast_weights = [last_weight + slope_per_day * i for i in range(1, forecast_days + 1)]
+        
+        # Calculate uncertainty bands (growing uncertainty over time)
+        forecast_stds = [historical_std * np.sqrt(1 + i/30) for i in range(1, forecast_days + 1)]
+        
+        # Create confidence intervals
+        forecast_upper = [w + ci_multiplier * std for w, std in zip(forecast_weights, forecast_stds)]
+        forecast_lower = [w - ci_multiplier * std for w, std in zip(forecast_weights, forecast_stds)]
+        
+        # Plot forecast fan
+        plt.fill_between(forecast_dates, forecast_lower, forecast_upper, 
+                        alpha=0.2, color='gray', label=f'Forecast ±{ci_multiplier:.1f}σ (1 month)')
+        
+        # Plot forecast mean line
+        plt.plot(forecast_dates, forecast_weights, '--', color='gray', linewidth=1.5, 
+                alpha=0.8, label='Forecast trend')
 
     plt.title("Weight Trend")
     plt.xlabel("Date")
@@ -628,7 +664,7 @@ def main() -> None:
     if ((not args.no_plot) and args.no_kalman_plot):
         try:
             ci_multiplier = get_confidence_multiplier(args.confidence_interval)
-            render_plot(entries, ema_dense_dates, ema_dense_values, slope_per_day, intercept, args.output, no_display=args.no_display, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier)
+            render_plot(entries, ema_dense_dates, ema_dense_values, slope_per_day, intercept, args.output, no_display=args.no_display, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier, enable_forecast=True)
             print(f"Plot saved to: {args.output}")
         except Exception as e:
             print(f"Failed to render plot: {e}")
@@ -663,7 +699,7 @@ def main() -> None:
     if kalman_states:
         # Create Kalman filter plot (if not disabled)
         if not args.no_kalman_plot:
-            create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier)
+            create_kalman_plot(entries, kalman_states, kalman_dates, args.output, no_display=args.no_display, label=plot_label, start_date=start_date, end_date=end_date, ci_multiplier=ci_multiplier, enable_forecast=True)
             print("Kalman plot saved to: weight_trend.png")
         
         # Create body fat plot using Kalman smoothing (if not disabled)
@@ -682,6 +718,7 @@ def main() -> None:
                     end_date=end_date,
                     lbm_csv=args.lbm_csv,
                     ci_multiplier=ci_multiplier,
+                    enable_forecast=True,
                 )
                 print("Body fat plot saved to: bodyfat_trend.png")
             except Exception as e:
@@ -701,6 +738,7 @@ def main() -> None:
                     start_date=start_date,
                     end_date=end_date,
                     ci_multiplier=ci_multiplier,
+                    enable_forecast=True,
                 )
                 print("BMI plot saved to: bmi_trend.png")
             except Exception as e:
@@ -721,6 +759,7 @@ def main() -> None:
                     end_date=end_date,
                     lbm_csv=args.lbm_csv,
                     ci_multiplier=ci_multiplier,
+                    enable_forecast=True,
                 )
                 print("FFMI plot saved to: ffmi_trend.png")
             except Exception as e:

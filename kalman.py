@@ -550,7 +550,8 @@ def create_kalman_plot(entries,
                       label: str = "Kalman Filter Estimate",
                       start_date: Optional[date] = None,
                       end_date: Optional[date] = None,
-                      ci_multiplier: float = 1.96) -> None:
+                      ci_multiplier: float = 1.96,
+                      enable_forecast: bool = True) -> None:
     """
     Create Kalman filter plot with raw data, filtered state, and confidence bands
     
@@ -672,6 +673,33 @@ Forecasts:
 1 week: {week_forecast:.2f} ± {ci_multiplier * week_std:.2f}
 1 month: {month_forecast:.2f} ± {ci_multiplier * month_std:.2f}"""
     
+    # Add forecasting fan if enabled
+    if enable_forecast and not (start_date or end_date):  # Only show forecast when not filtering by date
+        # Create forecast dates (1 month = 30 days) - start from day 0 to eliminate gap
+        forecast_days = 30
+        last_date = dense_datetimes[-1]
+        forecast_dates = [last_date + timedelta(days=i) for i in range(0, forecast_days + 1)]
+        
+        # Calculate forecast weights and uncertainty
+        forecast_weights = []
+        forecast_upper = []
+        forecast_lower = []
+        
+        for i in range(0, forecast_days + 1):
+            w_forecast, w_forecast_std = kf.forecast(float(i))
+            forecast_weights.append(w_forecast)
+            forecast_upper.append(w_forecast + ci_multiplier * w_forecast_std)
+            forecast_lower.append(w_forecast - ci_multiplier * w_forecast_std)
+        
+        # Plot forecast fan
+        ci_label = "95%" if abs(ci_multiplier - 1.96) < 0.01 else "1σ"
+        plt.fill_between(forecast_dates, forecast_lower, forecast_upper, 
+                        alpha=0.2, color='gray', label=f'Weight Forecast (1 month)')
+        
+        # Plot forecast mean line - use same color as main plot line
+        plt.plot(forecast_dates, forecast_weights, '--', color='#ff7f0e', linewidth=1.5, 
+                alpha=0.8, label='Weight Forecast trend')
+
     # Add stats box
     ax = plt.gca()
     ax.text(0.02, 0.02, stats_text, transform=ax.transAxes, 
@@ -782,6 +810,7 @@ def create_bodyfat_plot_from_kalman(
     end_date: Optional[date] = None,
     lbm_csv: Optional[str] = None,
     ci_multiplier: float = 1.96,
+    enable_forecast: bool = True,
 ) -> None:
     """
     Create Estimated Body Fat % vs Date plot using Kalman-smoothed weights.
@@ -1037,6 +1066,34 @@ def create_bodyfat_plot_from_kalman(
         halfwidth = float(max(bf_hi_val - bf_mid_val, bf_mid_val - bf_lo_val))
         return bf_mid_val, halfwidth
 
+    # Add forecasting fan if enabled
+    if enable_forecast and not (start_date or end_date):  # Only show forecast when not filtering by date
+        # Create forecast dates (1 month = 30 days) - start from day 0 to eliminate gap
+        forecast_days = 30
+        last_date = dense_datetimes[-1]
+        forecast_dates = [last_date + timedelta(days=i) for i in range(0, forecast_days + 1)]
+        
+        # Calculate forecast body fat values using the existing Kalman filter
+        forecast_bf_mid = []
+        forecast_bf_upper = []
+        forecast_bf_lower = []
+        
+        for i in range(0, forecast_days + 1):
+            w_forecast, w_forecast_std = kf.forecast(float(i))
+            bf_mid_val, bf_halfwidth = _bf_from_weight_at_offset(float(i), w_forecast, w_forecast_std)
+            forecast_bf_mid.append(bf_mid_val)
+            forecast_bf_upper.append(bf_mid_val + bf_halfwidth)
+            forecast_bf_lower.append(bf_mid_val - bf_halfwidth)
+        
+        # Plot forecast fan
+        ci_label = "95%" if abs(ci_multiplier - 1.96) < 0.01 else "1σ"
+        plt.fill_between(forecast_dates, forecast_bf_lower, forecast_bf_upper, 
+                        alpha=0.2, color='gray', label=f'Body Fat Forecast ±{ci_label} (1 month)')
+        
+        # Plot forecast mean line - use same color as main plot line (#1f77b4)
+        plt.plot(forecast_dates, forecast_bf_mid, '--', color='#1f77b4', linewidth=1.5, 
+                alpha=0.8, label='Body Fat Forecast trend')
+
     # 1 week forecast
     w_week, w_week_std = kf.forecast(7.0)
     bf_week_mid, bf_week_halfwidth = _bf_from_weight_at_offset(7.0, w_week, w_week_std)
@@ -1186,6 +1243,7 @@ def create_bmi_plot_from_kalman(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     ci_multiplier: float = 1.96,
+    enable_forecast: bool = True,
 ) -> None:
     """
     Create BMI vs Date plot using Kalman-smoothed weights and height data.
@@ -1305,6 +1363,47 @@ def create_bmi_plot_from_kalman(
     plt.axhline(y=25.0, color="orange", linestyle="--", alpha=0.7, label="Normal (25.0)")
     plt.axhline(y=30.0, color="red", linestyle="--", alpha=0.7, label="Overweight (30.0)")
 
+    # Add forecasting fan if enabled
+    if enable_forecast and not (start_date or end_date):  # Only show forecast when not filtering by date
+        # Get the last state for forecasting
+        last_state = states[-1]
+        last_date = dates[-1]
+        
+        # Calculate current BMI from last state
+        last_bmi = (last_state.weight * 0.453592) / (height_m ** 2)
+        last_bmi_std = (np.sqrt(last_state.weight_var) * 0.453592) / (height_m ** 2)
+        
+        # Create forecast dates (1 month = 30 days) - start from day 0 to eliminate gap
+        forecast_days = 30
+        forecast_dates = [last_date + timedelta(days=i) for i in range(0, forecast_days + 1)]
+        
+        # For BMI forecasting, we need to estimate weight trend
+        # Use the velocity from the last state to project weight forward
+        weight_velocity = last_state.velocity  # lbs/day
+        
+        # Calculate forecast weights and convert to BMI
+        forecast_weights = [last_state.weight + weight_velocity * i for i in range(0, forecast_days + 1)]
+        forecast_bmi = [(w * 0.453592) / (height_m ** 2) for w in forecast_weights]
+        
+        # Calculate uncertainty bands (growing uncertainty over time)
+        # Use the velocity variance to estimate growing uncertainty
+        velocity_std = np.sqrt(last_state.velocity_var)
+        forecast_weight_stds = [np.sqrt(last_state.weight_var + (velocity_std * i) ** 2) for i in range(0, forecast_days + 1)]
+        forecast_bmi_stds = [(std * 0.453592) / (height_m ** 2) for std in forecast_weight_stds]
+        
+        # Create confidence intervals
+        forecast_upper = [bmi + ci_multiplier * std for bmi, std in zip(forecast_bmi, forecast_bmi_stds)]
+        forecast_lower = [bmi - ci_multiplier * std for bmi, std in zip(forecast_bmi, forecast_bmi_stds)]
+        
+        # Plot forecast fan
+        ci_label = "95%" if abs(ci_multiplier - 1.96) < 0.01 else "1σ"
+        plt.fill_between(forecast_dates, forecast_lower, forecast_upper, 
+                        alpha=0.2, color='gray', label=f'BMI Forecast ±{ci_label} (1 month)')
+        
+        # Plot forecast mean line - use same color as main plot line (blue)
+        plt.plot(forecast_dates, forecast_bmi, '--', color='blue', linewidth=1.5, 
+                alpha=0.8, label='BMI Forecast trend')
+
     plt.xlabel("Date")
     plt.ylabel("BMI (kg/m²)")
     plt.title(f"BMI Trend (Height: {height_inches:.1f}\" = {height_m:.2f}m)")
@@ -1374,6 +1473,7 @@ def create_ffmi_plot_from_kalman(
     end_date: Optional[date] = None,
     lbm_csv: Optional[str] = None,
     ci_multiplier: float = 1.96,
+    enable_forecast: bool = True,
 ) -> None:
     """
     Create FFMI (Fat-Free Mass Index) vs Date plot using Kalman-smoothed weights and height data.
@@ -1528,6 +1628,65 @@ def create_ffmi_plot_from_kalman(
     plt.axhline(y=18.0, color="orange", linestyle="--", alpha=0.7, label="Average (18.0)")
     plt.axhline(y=20.0, color="green", linestyle="--", alpha=0.7, label="Above average (20.0)")
     plt.axhline(y=22.0, color="blue", linestyle="--", alpha=0.7, label="Excellent (22.0)")
+
+    # Add forecasting fan if enabled
+    if enable_forecast and not (start_date or end_date):  # Only show forecast when not filtering by date
+        # Get the last state for forecasting
+        last_state = states[-1]
+        last_date = dates[-1]
+        
+        # Create forecast dates (1 month = 30 days) - start from day 0 to eliminate gap
+        forecast_days = 30
+        forecast_dates = [last_date + timedelta(days=i) for i in range(0, forecast_days + 1)]
+        
+        # For FFMI forecasting, we need to estimate weight and LBM trends
+        # Use the velocity from the last state to project weight forward
+        weight_velocity = last_state.velocity  # lbs/day
+        
+        # Calculate forecast weights
+        forecast_weights = [last_state.weight + weight_velocity * i for i in range(0, forecast_days + 1)]
+        
+        # Calculate forecast LBM (assuming 10% lean mass loss rate)
+        s_mid = 0.10  # 10% lean, 90% fat decomposition
+        if lbm_csv:
+            # Use external LBM data if available
+            lbm_points = _load_lbm_csv(lbm_csv)
+            forecast_lbm = [_evaluate_lbm_series([last_date + timedelta(days=i)], lbm_points)[0] for i in range(0, forecast_days + 1)]
+        else:
+            # Use model-based LBM calculation
+            baseline_weight = last_state.weight  # Use current weight as baseline
+            baseline_lean = last_state.weight * 0.7  # Assume 70% lean mass initially
+            forecast_lbm = []
+            for i in range(0, forecast_days + 1):
+                w = forecast_weights[i]
+                # LBM = L0 + s*(W - W0) where s = 0.10
+                lbm = baseline_lean + s_mid * (w - baseline_weight)
+                forecast_lbm.append(max(0, lbm))
+        
+        # Calculate forecast FFMI
+        forecast_ffmi = [(lbm * 0.453592) / (height_m ** 2) for lbm in forecast_lbm]
+        
+        # Calculate uncertainty bands (growing uncertainty over time)
+        velocity_std = np.sqrt(last_state.velocity_var)
+        forecast_weight_stds = [np.sqrt(last_state.weight_var + (velocity_std * i) ** 2) for i in range(0, forecast_days + 1)]
+        
+        # Convert weight uncertainty to FFMI uncertainty
+        # FFMI = LBM(kg) / height(m)^2, where LBM depends on weight
+        # For simplicity, assume FFMI uncertainty scales with weight uncertainty
+        forecast_ffmi_stds = [(std * 0.453592 * s_mid) / (height_m ** 2) for std in forecast_weight_stds]
+        
+        # Create confidence intervals
+        forecast_upper = [ffmi + ci_multiplier * std for ffmi, std in zip(forecast_ffmi, forecast_ffmi_stds)]
+        forecast_lower = [ffmi - ci_multiplier * std for ffmi, std in zip(forecast_ffmi, forecast_ffmi_stds)]
+        
+        # Plot forecast fan
+        ci_label = "95%" if abs(ci_multiplier - 1.96) < 0.01 else "1σ"
+        plt.fill_between(forecast_dates, forecast_lower, forecast_upper, 
+                        alpha=0.2, color='gray', label=f'FFMI Forecast ±{ci_label} (1 month)')
+        
+        # Plot forecast mean line - use same color as main plot line (blue)
+        plt.plot(forecast_dates, forecast_ffmi, '--', color='blue', linewidth=1.5, 
+                alpha=0.8, label='FFMI Forecast trend')
 
     plt.xlabel("Date")
     plt.ylabel("FFMI (kg/m²)")
