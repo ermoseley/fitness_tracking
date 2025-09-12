@@ -426,7 +426,7 @@ def render_plot(entries: List[WeightEntry], ema_curve_dates: List[datetime], ema
         
         # Plot forecast mean line
         plt.plot(forecast_dates, forecast_weights, '--', color='gray', linewidth=1.5, 
-                alpha=0.8, label='Forecast trend')
+                alpha=0.8, label='Forecast')
 
     plt.title("Weight Trend")
     plt.xlabel("Date")

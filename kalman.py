@@ -694,11 +694,11 @@ Forecasts:
         # Plot forecast fan
         ci_label = "95%" if abs(ci_multiplier - 1.96) < 0.01 else "1σ"
         plt.fill_between(forecast_dates, forecast_lower, forecast_upper, 
-                        alpha=0.2, color='gray', label=f'Weight Forecast (1 month)')
+                        alpha=0.2, color='gray')
         
         # Plot forecast mean line - use same color as main plot line
         plt.plot(forecast_dates, forecast_weights, '--', color='#ff7f0e', linewidth=1.5, 
-                alpha=0.8, label='Weight Forecast trend')
+                alpha=0.8, label='Weight Forecast')
 
     # Add stats box
     ax = plt.gca()
@@ -1088,11 +1088,11 @@ def create_bodyfat_plot_from_kalman(
         # Plot forecast fan
         ci_label = "95%" if abs(ci_multiplier - 1.96) < 0.01 else "1σ"
         plt.fill_between(forecast_dates, forecast_bf_lower, forecast_bf_upper, 
-                        alpha=0.2, color='gray', label=f'Body Fat Forecast ±{ci_label} (1 month)')
+                        alpha=0.2, color='gray')
         
         # Plot forecast mean line - use same color as main plot line (#1f77b4)
         plt.plot(forecast_dates, forecast_bf_mid, '--', color='#1f77b4', linewidth=1.5, 
-                alpha=0.8, label='Body Fat Forecast trend')
+                alpha=0.8, label='Body Fat Forecast')
 
     # 1 week forecast
     w_week, w_week_std = kf.forecast(7.0)
@@ -1398,11 +1398,11 @@ def create_bmi_plot_from_kalman(
         # Plot forecast fan
         ci_label = "95%" if abs(ci_multiplier - 1.96) < 0.01 else "1σ"
         plt.fill_between(forecast_dates, forecast_lower, forecast_upper, 
-                        alpha=0.2, color='gray', label=f'BMI Forecast ±{ci_label} (1 month)')
+                        alpha=0.2, color='gray')
         
         # Plot forecast mean line - use same color as main plot line (blue)
         plt.plot(forecast_dates, forecast_bmi, '--', color='blue', linewidth=1.5, 
-                alpha=0.8, label='BMI Forecast trend')
+                alpha=0.8, label='BMI Forecast')
 
     plt.xlabel("Date")
     plt.ylabel("BMI (kg/m²)")
@@ -1682,11 +1682,11 @@ def create_ffmi_plot_from_kalman(
         # Plot forecast fan
         ci_label = "95%" if abs(ci_multiplier - 1.96) < 0.01 else "1σ"
         plt.fill_between(forecast_dates, forecast_lower, forecast_upper, 
-                        alpha=0.2, color='gray', label=f'FFMI Forecast ±{ci_label} (1 month)')
+                        alpha=0.2, color='gray')
         
         # Plot forecast mean line - use same color as main plot line (blue)
         plt.plot(forecast_dates, forecast_ffmi, '--', color='blue', linewidth=1.5, 
-                alpha=0.8, label='FFMI Forecast trend')
+                alpha=0.8, label='FFMI Forecast')
 
     plt.xlabel("Date")
     plt.ylabel("FFMI (kg/m²)")
