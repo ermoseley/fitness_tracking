@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 
-echo "Installing Weight Tracker dependencies..."
+echo "Installing BodyMetrics dependencies..."
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "Error: python3 not found. Please install Python 3.9+ and re-run." >&2
@@ -42,7 +42,7 @@ else
   echo "Note: sips/iconutil not found. Icon packaging steps will be skipped."
 fi
 
-LAUNCHER="$HOME/Desktop/Weight Tracker.command"
+LAUNCHER="$HOME/Desktop/BodyMetrics.command"
 echo "Creating Desktop launcher: $LAUNCHER"
 cat > "$LAUNCHER" <<EOF
 #!/usr/bin/env bash

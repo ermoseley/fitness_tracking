@@ -29,7 +29,7 @@ class GuiState:
 class WeightTrackerGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Weight Tracker")
+        self.root.title("BodyMetrics")
         self.root.geometry("1080x736")
         # Allow both horizontal and vertical resizing
         self.root.resizable(True, True)
@@ -384,7 +384,7 @@ class WeightTrackerGUI:
         
         if getattr(sys, 'frozen', False):
             # Running in a bundle - import and run weight_tracker directly
-            self._append_output("Running weight tracker (bundled mode)...")
+            self._append_output("Running BodyMetrics (bundled mode)...")
             self._run_bundled_weight_tracker()
         else:
             # Running from source - use subprocess
@@ -472,9 +472,9 @@ class WeightTrackerGUI:
                     if e.code == 0:
                         self._append_output("Done. You can click the buttons to open the generated plots.")
                     else:
-                        self._append_output(f"Weight tracker exited with code {e.code}")
+                        self._append_output(f"BodyMetrics exited with code {e.code}")
                 except Exception as e:
-                    self._append_output(f"Error running weight tracker: {e}")
+                    self._append_output(f"Error running BodyMetrics: {e}")
                     import traceback
                     self._append_output(f"Traceback: {traceback.format_exc()}")
             # Bring GUI to front after closing interactive plot windows

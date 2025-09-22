@@ -21,7 +21,7 @@ ln -sf "/Applications" "$INSTALLER_DIR/Applications"
 
 # Create a simple DMG using hdiutil
 echo "Creating DMG with hdiutil..."
-hdiutil create -volname "Weight Tracker Installer" -srcfolder "$INSTALLER_DIR" -ov -format UDZO "WeightTracker-Installer.dmg"
+hdiutil create -volname "BodyMetrics Installer" -srcfolder "$INSTALLER_DIR" -ov -format UDZO "WeightTracker-Installer.dmg"
 
 # Clean up
 rm -rf "$INSTALLER_DIR"

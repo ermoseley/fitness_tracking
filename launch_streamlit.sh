@@ -1,7 +1,7 @@
 #!/bin/bash
-# Launch script for Streamlit Weight Tracker
+# Launch script for Streamlit BodyMetrics
 
-echo "Starting Weight Tracker..."
+echo "Starting BodyMetrics..."
 echo "The app will open in your default web browser."
 echo "Press Ctrl+C to stop the application."
 echo ""

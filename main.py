@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gui import WeightTrackerGUI
 
 def main():
-    """Main function to launch the Weight Tracker GUI"""
+    """Main function to launch the BodyMetrics GUI"""
     try:
         # Create the main window
         root = tk.Tk()
@@ -39,7 +39,7 @@ def main():
         error_root = tk.Tk()
         error_root.withdraw()
         
-        messagebox.showerror("Error", f"Failed to launch Weight Tracker:\n{str(e)}")
+        messagebox.showerror("Error", f"Failed to launch BodyMetrics:\n{str(e)}")
         error_root.destroy()
         sys.exit(1)
 

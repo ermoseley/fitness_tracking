@@ -1,4 +1,4 @@
-# Weight Tracker - Streamlit Version
+# BodyMetrics - Streamlit Version
 
 A modern web-based fitness tracking application built with Streamlit, featuring advanced Kalman filtering for weight trend analysis and body composition tracking.
 
@@ -72,7 +72,29 @@ Should contain columns:
 - **Kalman Filtering**: Advanced state estimation for smooth weight trends
 - **Time-aware EMA**: Exponential moving average that accounts for irregular sampling
 - **Interactive Visualizations**: Built with Plotly for responsive charts
-- **Data Persistence**: All data stored in local CSV files in the `data/` directory
+- **Data Persistence**:
+  - Local dev: stored in SQLite at `data/fitness_tracker.db`
+  - Cloud: optionally use Postgres via `DATABASE_URL` (e.g., Supabase). Set in Streamlit secrets or environment.
+
+### Cloud Deployment (Streamlit Cloud)
+
+1. Push this repo to GitHub (public or private).
+2. In Streamlit Cloud, deploy the app pointing to `streamlit_app.py`.
+3. Configure secrets (if using managed Postgres):
+
+```toml
+[general]
+email = "you@example.com"
+
+[connections]
+
+[server]
+
+# Application secrets
+DATABASE_URL = "postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME"
+```
+
+4. If you do not set `DATABASE_URL`, the app will fall back to SQLite and store data in the app's filesystem (may be ephemeral on some platforms).
 
 ## Comparison with Original GUI
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Generate a simple cartoon-style logo for Weight Tracker.
+Generate a simple cartoon-style logo for BodyMetrics.
 Design: person flexing with a tape around waist, flat colors.
 Outputs a 1024x1024 transparent PNG at assets/icon_1024.png
 """

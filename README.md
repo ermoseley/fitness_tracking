@@ -1,4 +1,4 @@
-# Weight Tracker
+# BodyMetrics
 
 A Python application for tracking weight measurements with advanced analytics including Exponential Moving Average (EMA), time-weighted linear regression, and Kalman filtering. Features both command-line and graphical user interfaces.
 

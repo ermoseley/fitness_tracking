@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Launcher script for the Streamlit Weight Tracker
+Launcher script for the Streamlit BodyMetrics
 """
 
 import subprocess
@@ -8,7 +8,7 @@ import sys
 import os
 
 def main():
-    """Launch the Streamlit Weight Tracker application"""
+    """Launch the Streamlit BodyMetrics application"""
     # Get the directory where this script is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
     app_path = os.path.join(script_dir, "streamlit_app.py")
@@ -27,7 +27,7 @@ def main():
         sys.exit(1)
     
     # Launch the Streamlit app
-    print("Starting Weight Tracker...")
+    print("Starting BodyMetrics...")
     print("The app will open in your default web browser.")
     print("Press Ctrl+C to stop the application.")
     
@@ -38,7 +38,7 @@ def main():
             "--server.address", "localhost"
         ], cwd=script_dir)
     except KeyboardInterrupt:
-        print("\nWeight Tracker stopped.")
+        print("\nBodyMetrics stopped.")
     except Exception as e:
         print(f"Error launching application: {e}")
         sys.exit(1)

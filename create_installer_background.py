@@ -28,7 +28,7 @@ def create_installer_background():
             ax.axhline(y=y_pos, color='white', alpha=alpha * 0.3, linewidth=0.5)
     
     # Add title
-    ax.text(4, 4.5, 'Weight Tracker', fontsize=24, fontweight='bold', 
+    ax.text(4, 4.5, 'BodyMetrics', fontsize=24, fontweight='bold', 
             ha='center', va='center', color='#2c3e50')
     
     # Add subtitle

@@ -1,4 +1,4 @@
-# Weight Tracker Installation Guide
+# BodyMetrics Installation Guide
 
 ## Quick Start Installation
 

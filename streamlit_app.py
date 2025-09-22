@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Streamlit Fitness Tracking Application
-Port of the Weight Tracker GUI to Streamlit
+Port of the BodyMetrics GUI to Streamlit
 """
 
 import streamlit as st
@@ -23,9 +23,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import our existing modules
 from weight_tracker import (
-    WeightEntry, load_entries, parse_datetime, parse_date,
+    WeightEntry, parse_datetime, parse_date,
     compute_time_aware_ema, fit_time_weighted_linear_regression,
-    aggregate_entries, append_entry
+    aggregate_entries
+)
+from storage import (
+    init_database, get_weights_for_user, insert_weight_for_user, replace_weights_for_user,
+    get_lbm_df_for_user, insert_lbm_for_user, replace_lbm_for_user,
+    get_height_for_user, set_height_for_user
 )
 from kalman import (
     WeightKalmanFilter, KalmanState, run_kalman_filter, 
@@ -157,58 +162,100 @@ if 'residuals_bins' not in st.session_state:
 
 
 def load_data_files():
-    """Load data from CSV files"""
-    # Ensure per-user files exist before loading
-    ensure_user_files_exist()
-    data_dir = get_user_data_dir()
-    weights_path = os.path.join(data_dir, "weights.csv")
-    lbm_path = os.path.join(data_dir, "lbm.csv")
-    height_path = os.path.join(data_dir, "height.txt")
-    
-    # Load weights data
-    if os.path.exists(weights_path):
-        st.session_state.weights_data = load_entries(weights_path)
-        st.session_state.data_loaded = True
-    else:
+    """Load data for current user from the SQLite database"""
+    # Ensure we have a sanitized user id in session
+    user_id = sanitize_user_id(st.session_state.get("user_id", f"guest-{uuid.uuid4().hex[:8]}"))
+    st.session_state.user_id = user_id
+
+    # One-time migration: if DB is empty but legacy per-user CSV files exist, import them
+    try:
+        has_weights = False
+        try:
+            existing = get_weights_for_user(user_id)
+            has_weights = len(existing) > 0
+        except Exception:
+            has_weights = False
+
+        if not has_weights:
+            data_dir = os.path.join("data", "users", user_id)
+            weights_csv = os.path.join(data_dir, "weights.csv")
+            if os.path.exists(weights_csv):
+                try:
+                    df_w = pd.read_csv(weights_csv)
+                    if 'date' in df_w.columns and 'weight' in df_w.columns and len(df_w) > 0:
+                        replace_weights_for_user(user_id, df_w)
+                except Exception:
+                    # Fallback: try robust parser from weight_tracker
+                    try:
+                        from weight_tracker import load_entries as _load_entries
+                        entries = _load_entries(weights_csv)
+                        if entries:
+                            df_w2 = pd.DataFrame({
+                                'date': [e.entry_datetime for e in entries],
+                                'weight': [e.weight for e in entries]
+                            })
+                            replace_weights_for_user(user_id, df_w2)
+                    except Exception:
+                        pass
+
+            lbm_csv = os.path.join(data_dir, "lbm.csv")
+            if os.path.exists(lbm_csv):
+                try:
+                    df_l = pd.read_csv(lbm_csv)
+                    if 'date' in df_l.columns and 'lbm' in df_l.columns and len(df_l) > 0:
+                        replace_lbm_for_user(user_id, df_l)
+                except Exception:
+                    pass
+
+            height_txt = os.path.join(data_dir, "height.txt")
+            if get_height_for_user(user_id) is None and os.path.exists(height_txt):
+                try:
+                    with open(height_txt, 'r') as f:
+                        h_val = float(f.read().strip())
+                    set_height_for_user(user_id, h_val)
+                except Exception:
+                    pass
+    except Exception:
+        # Migration is best-effort; ignore failures
+        pass
+
+    # Load weights from DB
+    try:
+        rows = get_weights_for_user(user_id)
+        st.session_state.weights_data = [WeightEntry(dt, float(w)) for dt, w in rows]
+        st.session_state.data_loaded = bool(st.session_state.weights_data)
+    except Exception:
         st.session_state.weights_data = []
-    
-    # Load LBM data
-    if os.path.exists(lbm_path):
-        try:
-            df = pd.read_csv(lbm_path)
-            if 'date' in df.columns and 'lbm' in df.columns:
-                # Filter out any empty rows
-                df = df.dropna(subset=['date', 'lbm'])
-                if len(df) > 0:
-                    st.session_state.lbm_data = df
-                else:
-                    st.session_state.lbm_data = pd.DataFrame()
-            else:
-                st.session_state.lbm_data = pd.DataFrame()
-        except Exception as e:
-            st.session_state.lbm_data = pd.DataFrame()
-    else:
+        st.session_state.data_loaded = False
+
+    # Load LBM from DB
+    try:
+        st.session_state.lbm_data = get_lbm_df_for_user(user_id)
+    except Exception:
         st.session_state.lbm_data = pd.DataFrame()
-    
-    # Load height
-    if os.path.exists(height_path):
-        try:
-            with open(height_path, 'r') as f:
-                st.session_state.height = float(f.read().strip())
-        except:
-            st.session_state.height = 67.0
+
+    # Load height from DB (default to 67.0 inches if not set)
+    try:
+        h = get_height_for_user(user_id)
+        if h is None:
+            # initialize with default height in DB
+            default_height = float(st.session_state.get("height", 67.0))
+            set_height_for_user(user_id, default_height)
+            st.session_state.height = default_height
+        else:
+            st.session_state.height = float(h)
+    except Exception:
+        st.session_state.height = 67.0
 
 def save_height(height_inches: float):
-    """Save height to file"""
-    data_dir = get_user_data_dir()
-    os.makedirs(data_dir, exist_ok=True)
-    height_path = os.path.join(data_dir, "height.txt")
-    with open(height_path, 'w') as f:
-        f.write(f"{height_inches:.3f}")
-    st.session_state.height = height_inches
+    """Save height to database for current user"""
+    user_id = sanitize_user_id(st.session_state.user_id)
+    set_height_for_user(user_id, float(height_inches))
+    st.session_state.height = float(height_inches)
 
 def main():
-    # Load data on startup
+    # Initialize database and load data on startup
+    init_database()
     load_data_files()
     
     # Add custom CSS to reduce spacing between metrics and captions
@@ -222,7 +269,7 @@ def main():
     """, unsafe_allow_html=True)
     
     # Main header
-    st.markdown('<h1 class="main-header"> Weight Tracker</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header"> BodyMetrics</h1>', unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
@@ -347,11 +394,11 @@ def show_dashboard():
                 # Generate forecast data using configurable duration
                 forecast_days = int(st.session_state.forecast_days)
                 latest_date = ensure_py_datetime(dense_datetimes[-1])
-                forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(0, forecast_days)]
+                forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(1, forecast_days + 1)]
                 forecast_weights = []
                 forecast_uncertainties = []
                 
-                for i in range(0, forecast_days):
+                for i in range(1, forecast_days + 1):
                     weight, std = kf.forecast(float(i))
                     forecast_weights.append(weight)
                     forecast_uncertainties.append(std)
@@ -556,14 +603,8 @@ def show_add_entries():
             
             if st.button("Add Weight Entry", type="primary", key="add_weight"):
                 if weight_value > 0:
-                    # Create weight entry
-                    entry = WeightEntry(entry_datetime, weight_value)
-                    
-                    # Save to CSV (per-user directory)
-                    data_dir = get_user_data_dir()
-                    os.makedirs(data_dir, exist_ok=True)
-                    weights_path = os.path.join(data_dir, "weights.csv")
-                    append_entry(weights_path, entry)
+                    # Save to DB (per-user)
+                    insert_weight_for_user(sanitize_user_id(st.session_state.user_id), entry_datetime, float(weight_value))
                     
                     # Reload data
                     load_data_files()
@@ -587,19 +628,8 @@ def show_add_entries():
             
             if st.button("Add LBM Entry", type="primary", key="add_lbm"):
                 if lbm_value > 0:
-                    # Save to LBM CSV (per-user directory)
-                    data_dir = get_user_data_dir()
-                    os.makedirs(data_dir, exist_ok=True)
-                    lbm_path = os.path.join(data_dir, "lbm.csv")
-                    
-                    # Check if file exists and has content
-                    need_header = not os.path.exists(lbm_path) or os.path.getsize(lbm_path) == 0
-                    
-                    # Add entry to CSV
-                    with open(lbm_path, "a", newline="") as f:
-                        if need_header:
-                            f.write("date,lbm\n")
-                        f.write(f"{lbm_datetime.isoformat()},{lbm_value}\n")
+                    # Save to DB (per-user)
+                    insert_lbm_for_user(sanitize_user_id(st.session_state.user_id), lbm_datetime, float(lbm_value))
                     
                     # Reload data
                     load_data_files()
@@ -634,19 +664,8 @@ def show_add_entries():
                                 # Calculate LBM: LBM = weight * (1 - body_fat_percent/100)
                                 lbm = current_weight * (1.0 - bf_value / 100.0)
                                 
-                                # Save to LBM CSV (per-user directory)
-                                data_dir = get_user_data_dir()
-                                os.makedirs(data_dir, exist_ok=True)
-                                lbm_path = os.path.join(data_dir, "lbm.csv")
-                                
-                                # Check if file exists and has content
-                                need_header = not os.path.exists(lbm_path) or os.path.getsize(lbm_path) == 0
-                                
-                                # Add entry to CSV
-                                with open(lbm_path, "a", newline="") as f:
-                                    if need_header:
-                                        f.write("date,lbm\n")
-                                    f.write(f"{bf_datetime.isoformat()},{lbm:.2f}\n")
+                                # Save to DB (per-user)
+                                insert_lbm_for_user(sanitize_user_id(st.session_state.user_id), bf_datetime, float(lbm))
                                 
                                 # Reload data
                                 load_data_files()
@@ -767,11 +786,11 @@ def show_weight_tracking():
                     # Generate forecast data using configurable duration
                     forecast_days = int(st.session_state.forecast_days)
                     latest_date = ensure_py_datetime(dense_datetimes[-1])
-                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(0, forecast_days)]
+                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(1, forecast_days + 1)]
                     forecast_weights = []
                     forecast_uncertainties = []
                     
-                    for i in range(0, forecast_days):
+                    for i in range(1, forecast_days + 1):
                         weight, std = kf.forecast(float(i))
                         forecast_weights.append(weight)
                         forecast_uncertainties.append(std)
@@ -1453,11 +1472,8 @@ def show_data_management():
             try:
                 df = pd.read_csv(weights_file)
                 if 'date' in df.columns and 'weight' in df.columns:
-                    # Save to data directory
-                    data_dir = get_user_data_dir()
-                    os.makedirs(data_dir, exist_ok=True)
-                    weights_path = os.path.join(data_dir, "weights.csv")
-                    df.to_csv(weights_path, index=False)
+                    # Replace user's weights in DB
+                    replace_weights_for_user(sanitize_user_id(st.session_state.user_id), df)
                     
                     # Reload data
                     load_data_files()
@@ -1491,11 +1507,8 @@ def show_data_management():
                         st.error(f"Error converting data types: {e}")
                         return
                     
-                    # Save to data directory (per-user)
-                    data_dir = get_user_data_dir()
-                    os.makedirs(data_dir, exist_ok=True)
-                    lbm_path = os.path.join(data_dir, "lbm.csv")
-                    df.to_csv(lbm_path, index=False)
+                    # Replace user's LBM data in DB
+                    replace_lbm_for_user(sanitize_user_id(st.session_state.user_id), df)
                     
                     # Reload data
                     load_data_files()
@@ -1520,11 +1533,8 @@ def show_data_management():
                             df_fixed = df_fixed.dropna()
                             
                             if len(df_fixed) > 0:
-                                # Save the fixed file (per-user)
-                                data_dir = get_user_data_dir()
-                                os.makedirs(data_dir, exist_ok=True)
-                                lbm_path = os.path.join(data_dir, "lbm.csv")
-                                df_fixed.to_csv(lbm_path, index=False)
+                                # Replace user's LBM data in DB (auto-fixed format)
+                                replace_lbm_for_user(sanitize_user_id(st.session_state.user_id), df_fixed)
                                 
                                 # Reload data
                                 load_data_files()
@@ -1580,16 +1590,12 @@ def show_data_management():
                         # Sort entries by datetime
                         converted_entries.sort(key=lambda x: x.entry_datetime)
                         
-                        # Save to weights.csv (per-user)
-                        data_dir = get_user_data_dir()
-                        os.makedirs(data_dir, exist_ok=True)
-                        weights_path = os.path.join(data_dir, "weights.csv")
-                        
-                        # Write all entries to CSV
-                        with open(weights_path, 'w', newline='') as f:
-                            f.write("date,weight\n")
-                            for entry in converted_entries:
-                                f.write(f"{entry.entry_datetime.isoformat()},{entry.weight}\n")
+                        # Replace user's weights in DB
+                        conv_df = pd.DataFrame({
+                            'date': [e.entry_datetime for e in converted_entries],
+                            'weight': [e.weight for e in converted_entries]
+                        })
+                        replace_weights_for_user(sanitize_user_id(st.session_state.user_id), conv_df)
                         
                         # Reload data
                         load_data_files()
