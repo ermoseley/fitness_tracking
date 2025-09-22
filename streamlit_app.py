@@ -153,6 +153,16 @@ def main():
     # Load data on startup
     load_data_files()
     
+    # Add custom CSS to reduce spacing between metrics and captions
+    st.markdown("""
+    <style>
+    .stCaption {
+        margin-top: -10px !important;
+        margin-bottom: 10px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     # Main header
     st.markdown('<h1 class="main-header"> Weight Tracker</h1>', unsafe_allow_html=True)
     
@@ -161,7 +171,7 @@ def main():
         st.header("📊 Navigation")
         page = st.selectbox(
             "Choose a page:",
-            ["🏠 Dashboard", "➕ Add Entries", "📈 Weight Tracking", "📊 Body Composition", "⚙️ Settings", "📁 Data Management"]
+            ["🏠 Dashboard", "➕ Add Entries", "📈 Weight Analysis", "📊 Body Composition", "⚙️ Settings", "📁 Data Management"]
         )
         
         st.header("📋 Quick Stats")
@@ -178,7 +188,7 @@ def main():
         show_dashboard()
     elif page == "➕ Add Entries":
         show_add_entries()
-    elif page == "📈 Weight Tracking":
+    elif page == "📈 Weight Analysis":
         show_weight_tracking()
     elif page == "📊 Body Composition":
         show_body_composition()
@@ -215,33 +225,33 @@ def show_dashboard():
             
             with col1:
                 st.metric(
-                    "Current Weight",
-                    f"{latest_kalman.weight:.1f} lbs",
-                    f"±{ci_mult * latest_kalman.weight_var**0.5:.1f}"
+                    "Current Weight Estimate",
+                    f"{latest_kalman.weight:.1f} lbs"
                 )
+                st.caption(f"±{ci_mult * latest_kalman.weight_var**0.5:.1f}")
             
             with col2:
                 velocity_per_week = 7 * latest_kalman.velocity
                 st.metric(
                     "Weekly Rate",
-                    f"{velocity_per_week:+.3f} lbs/week",
-                    f"±{ci_mult * 7 * (latest_kalman.velocity_var**0.5):.3f}"
+                    f"{velocity_per_week:+.3f} lbs/week"
                 )
+                st.caption(f"±{ci_mult * 7 * (latest_kalman.velocity_var**0.5):.3f}")
             
             with col3:
                 calorie_deficit = latest_kalman.velocity * 3500
                 st.metric(
                     "Calorie Deficit",
-                    f"{calorie_deficit:+.0f} cal/day",
-                    "Estimated"
+                    f"{calorie_deficit:+.0f} cal/day"
                 )
+                st.caption("Estimated")
             
             with col4:
                 st.metric(
                     "Total Entries",
-                    len(entries),
-                    f"{(latest_entry.entry_datetime - first_entry.entry_datetime).days} days"
+                    len(entries)
                 )
+                st.caption(f"{(latest_entry.entry_datetime - first_entry.entry_datetime).days} days")
             
             # Weight trend chart with Kalman filter and forecast extension
             st.subheader("Weight Trend")
@@ -417,18 +427,18 @@ def show_dashboard():
                     week_forecast, week_std = kf.forecast(7.0)
                     st.metric(
                         "1-Week Forecast",
-                        f"{week_forecast:.2f} lbs",
-                        f"±{ci_mult * week_std:.2f}"
+                        f"{week_forecast:.2f} lbs"
                     )
+                    st.caption(f"±{ci_mult * week_std:.2f}")
                 
                 with col2:
                     forecast_days = st.session_state.forecast_days
                     forecast_value, forecast_std = kf.forecast(float(forecast_days))
                     st.metric(
                         f"{forecast_days}-Day Forecast",
-                        f"{forecast_value:.2f} lbs",
-                        f"±{ci_mult * forecast_std:.2f}"
+                        f"{forecast_value:.2f} lbs"
                     )
+                    st.caption(f"±{ci_mult * forecast_std:.2f}")
             
             # Recent entries table
             st.subheader("📋 Recent Entries")
@@ -587,7 +597,7 @@ def show_add_entries():
 def show_weight_tracking():
     """Weight tracking page with detailed analysis"""
     from datetime import timedelta
-    st.header("📈 Weight Tracking")
+    st.header("📈 Weight Analysis")
     
     # Display current data
     if st.session_state.weights_data:
@@ -608,25 +618,62 @@ def show_weight_tracking():
                 with col1:
                     st.metric(
                         "Kalman Weight Estimate",
-                        f"{latest_kalman.weight:.2f} lbs",
-                        f"±{ci_mult * latest_kalman.weight_var**0.5:.2f}"
+                        f"{latest_kalman.weight:.2f} lbs"
                     )
+                    st.caption(f"±{ci_mult * latest_kalman.weight_var**0.5:.2f}")
                 
                 with col2:
                     velocity_per_week = 7 * latest_kalman.velocity
                     st.metric(
                         "Weekly Rate",
-                        f"{velocity_per_week:+.3f} lbs/week",
-                        f"±{ci_mult * 7 * (latest_kalman.velocity_var**0.5):.3f}"
+                        f"{velocity_per_week:+.3f} lbs/week"
                     )
+                    st.caption(f"±{ci_mult * 7 * (latest_kalman.velocity_var**0.5):.3f}")
                 
                 with col3:
                     calorie_deficit = latest_kalman.velocity * 3500
                     st.metric(
                         "Calorie Deficit",
-                        f"{calorie_deficit:+.0f} cal/day",
-                        "Estimated"
+                        f"{calorie_deficit:+.0f} cal/day"
                     )
+                    st.caption("Estimated")
+                
+                # Forecast metrics (only if enabled)
+                if st.session_state.enable_forecast:
+                    st.subheader("🔮 Forecast Summary")
+                    col1, col2 = st.columns(2)
+                    
+                    # Calculate forecasts
+                    kf = WeightKalmanFilter(
+                        initial_weight=latest_kalman.weight,
+                        initial_velocity=latest_kalman.velocity,
+                        initial_weight_var=latest_kalman.weight_var,
+                        initial_velocity_var=latest_kalman.velocity_var,
+                    )
+                    kf.x = np.array([latest_kalman.weight, latest_kalman.velocity], dtype=float)
+                    kf.P = np.array([
+                        [latest_kalman.weight_var, latest_kalman.weight_velocity_cov],
+                        [latest_kalman.weight_velocity_cov, latest_kalman.velocity_var],
+                    ], dtype=float)
+                    
+                    ci_mult = get_confidence_multiplier(st.session_state.confidence_interval)
+                    
+                    with col1:
+                        week_forecast, week_std = kf.forecast(7.0)
+                        st.metric(
+                            "1-Week Forecast",
+                            f"{week_forecast:.2f} lbs"
+                        )
+                        st.caption(f"±{ci_mult * week_std:.2f}")
+                    
+                    with col2:
+                        forecast_days = st.session_state.forecast_days
+                        forecast_value, forecast_std = kf.forecast(float(forecast_days))
+                        st.metric(
+                            f"{forecast_days}-Day Forecast",
+                            f"{forecast_value:.2f} lbs"
+                        )
+                        st.caption(f"±{ci_mult * forecast_std:.2f}")
                 
                 # Kalman plot
                 st.subheader("🔬 Kalman Filter Analysis")
@@ -980,43 +1027,6 @@ def show_weight_tracking():
                         """)
                 else:
                     st.warning("No residuals data available for analysis")
-                
-                # Forecast metrics (only if enabled)
-                if st.session_state.enable_forecast:
-                    st.subheader("🔮 Forecast Summary")
-                    col1, col2 = st.columns(2)
-                    
-                    # Calculate forecasts
-                    kf = WeightKalmanFilter(
-                        initial_weight=latest_kalman.weight,
-                        initial_velocity=latest_kalman.velocity,
-                        initial_weight_var=latest_kalman.weight_var,
-                        initial_velocity_var=latest_kalman.velocity_var,
-                    )
-                    kf.x = np.array([latest_kalman.weight, latest_kalman.velocity], dtype=float)
-                    kf.P = np.array([
-                        [latest_kalman.weight_var, latest_kalman.weight_velocity_cov],
-                        [latest_kalman.weight_velocity_cov, latest_kalman.velocity_var],
-                    ], dtype=float)
-                    
-                    ci_mult = get_confidence_multiplier(st.session_state.confidence_interval)
-                    
-                    with col1:
-                        week_forecast, week_std = kf.forecast(7.0)
-                        st.metric(
-                            "1-Week Forecast",
-                            f"{week_forecast:.2f} lbs",
-                            f"±{ci_mult * week_std:.2f}"
-                        )
-                    
-                    with col2:
-                        forecast_days = st.session_state.forecast_days
-                        forecast_value, forecast_std = kf.forecast(float(forecast_days))
-                        st.metric(
-                            f"{forecast_days}-Day Forecast",
-                            f"{forecast_value:.2f} lbs",
-                            f"±{ci_mult * forecast_std:.2f}"
-                        )
         
         except Exception as e:
             st.error(f"Error running Kalman analysis: {e}")

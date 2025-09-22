@@ -10,7 +10,7 @@ A modern web-based fitness tracking application built with Streamlit, featuring 
 - Interactive weight trend visualization
 - Recent entries table
 
-### 📈 Weight Tracking
+### 📈 Weight Analysis
 - Add new weight entries with date/time
 - Kalman filter analysis with confidence intervals
 - Advanced trend analysis and forecasting
