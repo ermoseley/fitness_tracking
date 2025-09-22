@@ -150,6 +150,18 @@ def init_database() -> None:
             ))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_weights_user_date ON weights(user_id, date);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_lbm_user_date ON lbm(user_id, date);"))
+            # user preferences table
+            conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    confidence_interval TEXT NOT NULL DEFAULT '1σ',
+                    enable_forecast INTEGER NOT NULL DEFAULT 1,
+                    forecast_days INTEGER NOT NULL DEFAULT 30,
+                    residuals_bins INTEGER NOT NULL DEFAULT 15
+                );
+                """
+            ))
     else:
         with db_cursor() as cur:
             cur.execute(
@@ -183,6 +195,18 @@ def init_database() -> None:
             # Indices for query performance
             cur.execute("CREATE INDEX IF NOT EXISTS idx_weights_user_date ON weights(user_id, date);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_lbm_user_date ON lbm(user_id, date);")
+            # user preferences table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    confidence_interval TEXT NOT NULL DEFAULT '1σ',
+                    enable_forecast INTEGER NOT NULL DEFAULT 1,
+                    forecast_days INTEGER NOT NULL DEFAULT 30,
+                    residuals_bins INTEGER NOT NULL DEFAULT 15
+                );
+                """
+            )
 
 
 # -------------------------
@@ -384,6 +408,70 @@ def set_height_for_user(user_id: str, height_inches: float) -> None:
                 "INSERT INTO user_settings (user_id, height) VALUES (?, ?) \n"
                 "ON CONFLICT(user_id) DO UPDATE SET height=excluded.height;",
                 (user_id, float(height_inches)),
+            )
+
+
+# -------------------------
+# User preferences API
+# -------------------------
+
+from typing import Dict
+
+def get_preferences_for_user(user_id: str) -> Dict[str, object]:
+    if _USE_SQLALCHEMY:
+        from sqlalchemy import text  # type: ignore
+        with db_cursor() as conn:
+            row = conn.execute(text("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins FROM user_preferences WHERE user_id=:uid;"), {"uid": user_id}).fetchone()
+        if not row:
+            return {}
+        return {
+            "confidence_interval": row[0],
+            "enable_forecast": bool(row[1]),
+            "forecast_days": int(row[2]),
+            "residuals_bins": int(row[3]),
+        }
+    else:
+        with db_cursor() as cur:
+            cur.execute("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins FROM user_preferences WHERE user_id=?;", (user_id,))
+            row = cur.fetchone()
+        if not row:
+            return {}
+        return {
+            "confidence_interval": row[0],
+            "enable_forecast": bool(row[1]),
+            "forecast_days": int(row[2]),
+            "residuals_bins": int(row[3]),
+        }
+
+
+def set_preferences_for_user(user_id: str, confidence_interval: str, enable_forecast: bool, forecast_days: int, residuals_bins: int) -> None:
+    if _USE_SQLALCHEMY:
+        from sqlalchemy import text  # type: ignore
+        with db_cursor() as conn:
+            conn.execute(text(
+                """
+                INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins)
+                VALUES (:uid, :ci, :ef, :fd, :rb)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    confidence_interval=excluded.confidence_interval,
+                    enable_forecast=excluded.enable_forecast,
+                    forecast_days=excluded.forecast_days,
+                    residuals_bins=excluded.residuals_bins;
+                """
+            ), {"uid": user_id, "ci": confidence_interval, "ef": 1 if enable_forecast else 0, "fd": int(forecast_days), "rb": int(residuals_bins)})
+    else:
+        with db_cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    confidence_interval=excluded.confidence_interval,
+                    enable_forecast=excluded.enable_forecast,
+                    forecast_days=excluded.forecast_days,
+                    residuals_bins=excluded.residuals_bins;
+                """,
+                (user_id, confidence_interval, 1 if enable_forecast else 0, int(forecast_days), int(residuals_bins))
             )
 
 

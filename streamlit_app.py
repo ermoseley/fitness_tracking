@@ -30,7 +30,8 @@ from weight_tracker import (
 from storage import (
     init_database, get_weights_for_user, insert_weight_for_user, replace_weights_for_user,
     get_lbm_df_for_user, insert_lbm_for_user, replace_lbm_for_user,
-    get_height_for_user, set_height_for_user
+    get_height_for_user, set_height_for_user,
+    get_preferences_for_user, set_preferences_for_user
 )
 from auth import init_auth_tables, require_auth, get_current_user, logout
 from kalman import (
@@ -254,6 +255,26 @@ def load_data_files():
     except Exception:
         st.session_state.height = 67.0
 
+    # Load user preferences and sync into session
+    try:
+        prefs = get_preferences_for_user(user_id)
+        if prefs:
+            st.session_state.confidence_interval = prefs.get("confidence_interval", st.session_state.confidence_interval)
+            st.session_state.enable_forecast = bool(prefs.get("enable_forecast", st.session_state.enable_forecast))
+            st.session_state.forecast_days = int(prefs.get("forecast_days", st.session_state.forecast_days))
+            st.session_state.residuals_bins = int(prefs.get("residuals_bins", st.session_state.residuals_bins))
+        else:
+            # Persist defaults for first-time users
+            set_preferences_for_user(
+                user_id,
+                st.session_state.confidence_interval,
+                bool(st.session_state.enable_forecast),
+                int(st.session_state.forecast_days),
+                int(st.session_state.residuals_bins),
+            )
+    except Exception:
+        pass
+
 def save_height(height_inches: float):
     """Save height to database for current user"""
     user_id = get_current_user()
@@ -307,7 +328,7 @@ def main():
         st.header("📊 Navigation")
         page = st.selectbox(
             "Choose a page:",
-            ["🏠 Dashboard", "➕ Add Entries", "📈 Weight Analysis", "📊 Composition Analysis", "⚙️ Settings", "📁 Data Management"]
+            ["🏠 Dashboard", "➕ Add Entries", "📈 Weight Analysis", "📊 Composition Analysis", "⚙️ Settings", "📁 Data Management", "⚠️ Disclaimer"]
         )
         
         st.header("📋 Quick Stats")
@@ -332,6 +353,8 @@ def main():
         show_settings()
     elif page == "📁 Data Management":
         show_data_management()
+    elif page == "⚠️ Disclaimer":
+        show_disclaimer()
 
 def show_dashboard():
     """Main dashboard with overview metrics and charts"""
@@ -1390,6 +1413,18 @@ def show_settings():
         # Update session state immediately when changed
         if confidence_interval != st.session_state.confidence_interval:
             st.session_state.confidence_interval = confidence_interval
+            try:
+                user_id = get_current_user()
+                if user_id:
+                    set_preferences_for_user(
+                        sanitize_user_id(user_id),
+                        st.session_state.confidence_interval,
+                        bool(st.session_state.enable_forecast),
+                        int(st.session_state.forecast_days),
+                        int(st.session_state.residuals_bins),
+                    )
+            except Exception:
+                pass
             st.rerun()
     
     with col2:
@@ -1425,10 +1460,34 @@ def show_settings():
         # Update session state immediately when changed
         if enable_forecast != st.session_state.enable_forecast:
             st.session_state.enable_forecast = enable_forecast
+            try:
+                user_id = get_current_user()
+                if user_id:
+                    set_preferences_for_user(
+                        sanitize_user_id(user_id),
+                        st.session_state.confidence_interval,
+                        bool(st.session_state.enable_forecast),
+                        int(st.session_state.forecast_days),
+                        int(st.session_state.residuals_bins),
+                    )
+            except Exception:
+                pass
             st.rerun()
         
         if forecast_days != st.session_state.forecast_days:
             st.session_state.forecast_days = forecast_days
+            try:
+                user_id = get_current_user()
+                if user_id:
+                    set_preferences_for_user(
+                        sanitize_user_id(user_id),
+                        st.session_state.confidence_interval,
+                        bool(st.session_state.enable_forecast),
+                        int(st.session_state.forecast_days),
+                        int(st.session_state.residuals_bins),
+                    )
+            except Exception:
+                pass
             st.rerun()
     
     with col2:
@@ -1443,6 +1502,18 @@ def show_settings():
         # Update session state immediately when changed
         if residuals_bins != st.session_state.residuals_bins:
             st.session_state.residuals_bins = residuals_bins
+            try:
+                user_id = get_current_user()
+                if user_id:
+                    set_preferences_for_user(
+                        sanitize_user_id(user_id),
+                        st.session_state.confidence_interval,
+                        bool(st.session_state.enable_forecast),
+                        int(st.session_state.forecast_days),
+                        int(st.session_state.residuals_bins),
+                    )
+            except Exception:
+                pass
             st.rerun()
         
     
@@ -1745,6 +1816,72 @@ def get_ffmi_category(ffmi: float, gender: str) -> str:
             return "Excellent"
         else:
             return "Exceptional"
+
+def show_disclaimer():
+    """Display disclaimer and terms of use"""
+    st.header("⚠️ Disclaimer and Terms of Use")
+    
+    st.markdown("""
+    ### Important Notice
+    
+    This fitness tracking application is provided for informational purposes only. Please read the following disclaimers carefully before using this service.
+    """)
+    
+    st.markdown("""
+    #### Data Security and Reliability
+    
+    **No Data Guarantee**: We cannot guarantee that this application will be available at all times or that your data will be permanently preserved. Technical issues, server maintenance, or other unforeseen circumstances may result in temporary or permanent data loss.
+    
+    **Data Backup Recommendation**: We strongly recommend that you maintain your own backup copies of any important fitness data. Export your data regularly using the Data Management features to ensure you have local copies of your information.
+    
+    **Use at Your Own Risk**: You acknowledge and agree that you use this application at your own risk and that we are not responsible for any data loss, corruption, or unavailability.
+    """)
+    
+    st.markdown("""
+    #### Health and Medical Disclaimer
+    
+    **Not Medical Advice**: The information provided by this application is for general informational purposes only and is not intended as medical advice, diagnosis, or treatment. This application does not provide professional medical services.
+    
+    **Consult Healthcare Professionals**: Before making any significant changes to your diet, exercise routine, or weight management plan, you should consult with qualified healthcare professionals, including but not limited to:
+    - Licensed physicians
+    - Registered dietitians
+    - Certified fitness professionals
+    - Other appropriate healthcare providers
+    
+    **Individual Results May Vary**: Fitness and health outcomes vary significantly between individuals. The calculations, trends, and recommendations provided by this application are based on general formulas and may not be appropriate for your specific circumstances.
+    
+    **Not a Substitute for Professional Care**: This application is not a substitute for professional medical advice, diagnosis, or treatment. Always seek the advice of your physician or other qualified health provider with any questions you may have regarding a medical condition.
+    """)
+    
+    st.markdown("""
+    #### Limitation of Liability
+    
+    **No Warranties**: This application is provided "as is" without any warranties, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, or non-infringement.
+    
+    **Limitation of Damages**: In no event shall the developers, operators, or distributors of this application be liable for any direct, indirect, incidental, special, consequential, or punitive damages arising out of or relating to your use of this application.
+    """)
+    
+    st.markdown("""
+    #### User Responsibilities
+    
+    **Accurate Data Entry**: You are responsible for ensuring the accuracy of all data you enter into this application. Inaccurate data will lead to inaccurate calculations and recommendations.
+    
+    **Regular Backups**: You are responsible for maintaining backup copies of your data and for ensuring the security of your account credentials.
+    
+    **Compliance with Terms**: By using this application, you agree to comply with all applicable terms of use and to use the application only for lawful purposes.
+    """)
+    
+    st.markdown("""
+    #### Contact Information
+    
+    If you have questions about this disclaimer or the application, please contact the development team through the appropriate channels.
+    
+    **Last Updated**: This disclaimer was last updated on the date of the current application version.
+    """)
+    
+    st.warning("""
+    **By continuing to use this application, you acknowledge that you have read, understood, and agree to be bound by this disclaimer and all applicable terms of use.**
+    """)
 
 if __name__ == "__main__":
     main()
