@@ -1852,7 +1852,7 @@ def show_user_guide():
     ### Initial Setup
     1. **Authentication**: Log in with your credentials or create a new account
     2. **Height Configuration**: Set your height in the Settings page (required for BMI calculations)
-    3. **First Data Entry**: Add your first weight measurement using the Add Entries page
+    3. **First Data Entry**: Add your first weight measurement using the Add Entries page. Alternatively, you can import your data from a CSV file, optionally one from a FITINDEX app export.
     
     ### Navigation
     Use the sidebar navigation to access different features:
@@ -1929,12 +1929,13 @@ def show_user_guide():
     ### Chart Features
     - **Interactive Plots**: Zoom, pan, and hover for detailed information
     - **Multiple Views**: Raw data, smoothed trends, and forecasts
-    - **Export Options**: Save charts as images for external use
+    - **Statistical Analysis**: Confidence intervals and trend analysis
     
     ### Settings
     - **Confidence Levels**: Adjust statistical confidence intervals (1σ, 95%)
-    - **Forecast Period**: Set how far into the future to project trends
-    - **Filter Parameters**: Fine-tune the Kalman filter sensitivity
+    - **Forecast Period**: Set how far into the future to project trends (7-90 days)
+    - **Aggregation Window**: Group measurements within time windows (0-24 hours)
+    - **Residuals Analysis**: Configure histogram bins for error analysis
     """)
     
     # Body Composition Analysis
@@ -1958,7 +1959,8 @@ def show_user_guide():
     ### Interpretation Guidelines
     - **BMI Ranges**: Underweight (<18.5), Normal (18.5-24.9), Overweight (25-29.9), Obese (≥30)
     - **FFMI Categories**: Below Average, Average, Above Average, Excellent, Exceptional
-    - **Body Fat Ranges**: Vary by age and gender; consult health professionals for guidance
+    - **Body Fat Categories**: Essential fat, Athletes, Fitness, Average, Above Average, Obese
+    - **Note**: Categories are based on general guidelines; consult health professionals for personalized ranges
     """)
     
     # Settings and Configuration
@@ -1967,18 +1969,17 @@ def show_user_guide():
     
     ### User Profile
     - **Height Setting**: Required for BMI and FFMI calculations
-    - **Gender Selection**: Affects body composition category ranges
-    - **Account Management**: Update login credentials and personal information
+    - **User Authentication**: Login/logout functionality for data security
     
-    ### Display Preferences
-    - **Chart Themes**: Choose between different visual styles
-    - **Date Formats**: Customize how dates are displayed
-    - **Units**: Currently supports imperial units (pounds, inches)
+    ### Analysis Settings
+    - **Confidence Intervals**: Choose between 1σ and 95% confidence levels
+    - **Forecasting**: Enable/disable future trend projections
+    - **Forecast Duration**: Set how many days to project into the future
+    - **Aggregation Window**: Group measurements within specified time windows
     
-    ### Data Preferences
-    - **Default Entry Time**: Set standard time for new measurements
-    - **Auto-save Settings**: Configure automatic data saving behavior
-    - **Notification Preferences**: Set up alerts for data entry reminders
+    ### Data Export
+    - **Weights CSV**: Download weight data as CSV file
+    - **LBM CSV**: Download lean body mass data as CSV file
     """)
     
     # Data Management
@@ -1987,16 +1988,16 @@ def show_user_guide():
     
     ### Importing Data
     1. Navigate to **Data Management** page
-    2. Select **Import CSV** tab
-    3. Choose your CSV file (must have proper headers)
-    4. Map columns to data types (weight, LBM, body fat %)
-    5. Preview and confirm import
+    2. Upload CSV files using the file uploaders
+    3. Choose appropriate file type (Weights CSV, LBM CSV, or FITINDEX CSV)
+    4. Ensure proper column headers (date, weight for weights; date, lbm for LBM)
+    5. Files are automatically processed and imported
     
     ### Exporting Data
-    1. Select **Export Data** tab
-    2. Choose data type to export (weights, LBM, body fat %)
-    3. Select date range
-    4. Download CSV file
+    1. Navigate to **Settings** page
+    2. Scroll to **Data Export** section
+    3. Click download buttons for available data types
+    4. CSV files are automatically generated with current data
     
     ### Data Backup
     - **Regular Exports**: Download your data regularly for backup
@@ -2005,9 +2006,12 @@ def show_user_guide():
     
     ### File Requirements
     - **CSV Format**: Comma-separated values with headers
-    - **Date Format**: YYYY-MM-DD or MM/DD/YYYY
-    - **Time Format**: HH:MM (24-hour format)
-    - **Required Headers**: date, weight (for weight data)
+    - **Date Format**: YYYY-MM-DD or MM/DD/YYYY (auto-detected)
+    - **Time Format**: HH:MM (24-hour format) or included in datetime
+    - **Required Headers**: 
+      - Weights: date, weight
+      - LBM: date, lbm
+      - FITINDEX: Time of Measurement, Weight(lb)
     """)
     
     # Understanding the Analytics
@@ -2029,7 +2033,7 @@ def show_user_guide():
     - **Blue Dots**: Raw data points
     - **Red Line**: Smoothed trend (Kalman filter output)
     - **Shaded Area**: Confidence interval around trend
-    - **Dashed Line**: Future forecast projection
+    - **Dashed Line**: Future forecast projection (if enabled)
     """)
     
     # Troubleshooting
