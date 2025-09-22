@@ -488,3 +488,47 @@ def migrate_lbm_csv_to_db(user_id: str, csv_df: pd.DataFrame) -> None:
     replace_lbm_for_user(user_id, csv_df)
 
 
+def delete_weight_entry(user_id: str, entry_datetime: datetime) -> bool:
+    """Delete a specific weight entry by datetime. Returns True if deleted."""
+    try:
+        with db_cursor() as conn:
+            if _USE_SQLALCHEMY:
+                from sqlalchemy import text
+                result = conn.execute(
+                    text("DELETE FROM weights WHERE user_id=:uid AND date=:dt;"),
+                    {"uid": user_id, "dt": entry_datetime.isoformat()}
+                )
+                return result.rowcount > 0
+            else:
+                cur = conn.cursor()
+                cur.execute(
+                    "DELETE FROM weights WHERE user_id=? AND date=?;",
+                    (user_id, entry_datetime.isoformat())
+                )
+                return cur.rowcount > 0
+    except Exception:
+        return False
+
+
+def delete_lbm_entry(user_id: str, entry_datetime: datetime) -> bool:
+    """Delete a specific LBM entry by datetime. Returns True if deleted."""
+    try:
+        with db_cursor() as conn:
+            if _USE_SQLALCHEMY:
+                from sqlalchemy import text
+                result = conn.execute(
+                    text("DELETE FROM lbm WHERE user_id=:uid AND date=:dt;"),
+                    {"uid": user_id, "dt": entry_datetime.isoformat()}
+                )
+                return result.rowcount > 0
+            else:
+                cur = conn.cursor()
+                cur.execute(
+                    "DELETE FROM lbm WHERE user_id=? AND date=?;",
+                    (user_id, entry_datetime.isoformat())
+                )
+                return cur.rowcount > 0
+    except Exception:
+        return False
+
+

@@ -31,7 +31,8 @@ from storage import (
     init_database, get_weights_for_user, insert_weight_for_user, replace_weights_for_user,
     get_lbm_df_for_user, insert_lbm_for_user, replace_lbm_for_user,
     get_height_for_user, set_height_for_user,
-    get_preferences_for_user, set_preferences_for_user
+    get_preferences_for_user, set_preferences_for_user,
+    delete_weight_entry, delete_lbm_entry
 )
 from auth import init_auth_tables, require_auth, get_current_user, logout
 from kalman import (
@@ -1741,22 +1742,222 @@ def show_data_management():
         else:
             st.write("No LBM data available")
     
-    # Data preview
-    if st.session_state.weights_data:
-        st.subheader("📋 Weight Data Preview")
-        recent_weights = st.session_state.weights_data[-10:]
-        weights_df = pd.DataFrame([
-            {
-                'Date': entry.entry_datetime.strftime('%Y-%m-%d %H:%M'),
-                'Weight (lbs)': f"{entry.weight:.1f}"
-            }
-            for entry in recent_weights
-        ])
-        st.dataframe(weights_df, width='stretch')
+    # Data Management Tabs
+    st.subheader("📊 Data Management")
     
-    if not st.session_state.lbm_data.empty:
-        st.subheader("📋 LBM Data Preview")
-        st.dataframe(st.session_state.lbm_data.tail(10), width='stretch')
+    tab1, tab2, tab3, tab4 = st.tabs(["View & Edit Data", "Add Manual Entries", "Bulk Operations", "Data Preview"])
+    
+    with tab1:
+        st.write("**View and manage your data entries**")
+        
+        # Weight Data Management
+        if st.session_state.weights_data:
+            st.write("**Weight Entries**")
+            
+            # Create editable dataframe for weights
+            weights_data = []
+            for i, entry in enumerate(st.session_state.weights_data):
+                weights_data.append({
+                    'Index': i,
+                    'Date': entry.entry_datetime.strftime('%Y-%m-%d'),
+                    'Time': entry.entry_datetime.strftime('%H:%M'),
+                    'Weight (lbs)': entry.weight,
+                    'Delete': False
+                })
+            
+            weights_df = pd.DataFrame(weights_data)
+            
+            # Display with checkboxes for deletion
+            edited_weights_df = st.data_editor(
+                weights_df,
+                column_config={
+                    "Index": st.column_config.NumberColumn("Index", disabled=True),
+                    "Date": st.column_config.TextColumn("Date", disabled=True),
+                    "Time": st.column_config.TextColumn("Time", disabled=True),
+                    "Weight (lbs)": st.column_config.NumberColumn("Weight (lbs)", format="%.1f"),
+                    "Delete": st.column_config.CheckboxColumn("Delete", help="Check to delete this entry")
+                },
+                hide_index=True,
+                use_container_width=True,
+                key="weights_editor"
+            )
+            
+            # Handle deletions
+            if st.button("Delete Selected Weight Entries", type="secondary"):
+                user_id = get_current_user()
+                if user_id:
+                    deleted_count = 0
+                    for idx, row in edited_weights_df.iterrows():
+                        if row['Delete']:
+                            entry = st.session_state.weights_data[row['Index']]
+                            if delete_weight_entry(sanitize_user_id(user_id), entry.entry_datetime):
+                                deleted_count += 1
+                    
+                    if deleted_count > 0:
+                        load_data_files()
+                        st.success(f"Deleted {deleted_count} weight entries")
+                        st.rerun()
+                    else:
+                        st.warning("No entries selected for deletion")
+        else:
+            st.info("No weight data available")
+        
+        # LBM Data Management
+        if not st.session_state.lbm_data.empty:
+            st.write("**LBM Entries**")
+            
+            # Create editable dataframe for LBM
+            lbm_data = []
+            for i, (_, row) in enumerate(st.session_state.lbm_data.iterrows()):
+                lbm_data.append({
+                    'Index': i,
+                    'Date': pd.to_datetime(row['date']).strftime('%Y-%m-%d'),
+                    'LBM (lbs)': row['lbm'],
+                    'Delete': False
+                })
+            
+            lbm_df = pd.DataFrame(lbm_data)
+            
+            # Display with checkboxes for deletion
+            edited_lbm_df = st.data_editor(
+                lbm_df,
+                column_config={
+                    "Index": st.column_config.NumberColumn("Index", disabled=True),
+                    "Date": st.column_config.TextColumn("Date", disabled=True),
+                    "LBM (lbs)": st.column_config.NumberColumn("LBM (lbs)", format="%.1f"),
+                    "Delete": st.column_config.CheckboxColumn("Delete", help="Check to delete this entry")
+                },
+                hide_index=True,
+                use_container_width=True,
+                key="lbm_editor"
+            )
+            
+            # Handle deletions
+            if st.button("Delete Selected LBM Entries", type="secondary"):
+                user_id = get_current_user()
+                if user_id:
+                    deleted_count = 0
+                    for idx, row in edited_lbm_df.iterrows():
+                        if row['Delete']:
+                            lbm_row = st.session_state.lbm_data.iloc[row['Index']]
+                            entry_datetime = pd.to_datetime(lbm_row['date'])
+                            if delete_lbm_entry(sanitize_user_id(user_id), entry_datetime):
+                                deleted_count += 1
+                    
+                    if deleted_count > 0:
+                        load_data_files()
+                        st.success(f"Deleted {deleted_count} LBM entries")
+                        st.rerun()
+                    else:
+                        st.warning("No entries selected for deletion")
+        else:
+            st.info("No LBM data available")
+    
+    with tab2:
+        st.write("**Add new entries manually**")
+        
+        # Manual Weight Entry
+        st.write("**Add Weight Entry**")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            manual_weight_date = st.date_input("Date", value=date.today(), key="manual_weight_date")
+        with col2:
+            manual_weight_time = st.time_input("Time", value=datetime.strptime("09:00", "%H:%M").time(), key="manual_weight_time")
+        with col3:
+            manual_weight_value = st.number_input("Weight (lbs)", min_value=50.0, max_value=500.0, value=150.0, step=0.1, key="manual_weight_value")
+        
+        if st.button("Add Weight Entry", type="primary", key="add_manual_weight"):
+            if manual_weight_value > 0:
+                entry_datetime = datetime.combine(manual_weight_date, manual_weight_time)
+                user_id = get_current_user()
+                if user_id:
+                    insert_weight_for_user(sanitize_user_id(user_id), entry_datetime, float(manual_weight_value))
+                    load_data_files()
+                    st.success(f"Weight entry added: {manual_weight_value} lbs on {entry_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    st.rerun()
+        
+        # Manual LBM Entry
+        st.write("**Add LBM Entry**")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            manual_lbm_date = st.date_input("Date", value=date.today(), key="manual_lbm_date")
+        with col2:
+            manual_lbm_time = st.time_input("Time", value=datetime.strptime("09:00", "%H:%M").time(), key="manual_lbm_time")
+        with col3:
+            manual_lbm_value = st.number_input("LBM (lbs)", min_value=50.0, max_value=300.0, value=120.0, step=0.1, key="manual_lbm_value")
+        
+        if st.button("Add LBM Entry", type="primary", key="add_manual_lbm"):
+            if manual_lbm_value > 0:
+                entry_datetime = datetime.combine(manual_lbm_date, manual_lbm_time)
+                user_id = get_current_user()
+                if user_id:
+                    # Create DataFrame for LBM entry
+                    lbm_df = pd.DataFrame({
+                        'date': [entry_datetime],
+                        'lbm': [manual_lbm_value]
+                    })
+                    insert_lbm_for_user(sanitize_user_id(user_id), lbm_df)
+                    load_data_files()
+                    st.success(f"LBM entry added: {manual_lbm_value} lbs on {entry_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    st.rerun()
+    
+    with tab3:
+        st.write("**Bulk operations on your data**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Weight Data Operations**")
+            if st.session_state.weights_data:
+                if st.button("Clear All Weight Data", type="secondary"):
+                    user_id = get_current_user()
+                    if user_id:
+                        replace_weights_for_user(sanitize_user_id(user_id), pd.DataFrame(columns=['date', 'weight']))
+                        load_data_files()
+                        st.success("All weight data cleared")
+                        st.rerun()
+            else:
+                st.info("No weight data to clear")
+        
+        with col2:
+            st.write("**LBM Data Operations**")
+            if not st.session_state.lbm_data.empty:
+                if st.button("Clear All LBM Data", type="secondary"):
+                    user_id = get_current_user()
+                    if user_id:
+                        replace_lbm_for_user(sanitize_user_id(user_id), pd.DataFrame(columns=['date', 'lbm']))
+                        load_data_files()
+                        st.success("All LBM data cleared")
+                        st.rerun()
+            else:
+                st.info("No LBM data to clear")
+    
+    with tab4:
+        st.write("**Quick data preview**")
+        
+        # Weight Data Preview
+        if st.session_state.weights_data:
+            st.write("**Recent Weight Entries**")
+            recent_weights = st.session_state.weights_data[-10:]
+            weights_df = pd.DataFrame([
+                {
+                    'Date': entry.entry_datetime.strftime('%Y-%m-%d %H:%M'),
+                    'Weight (lbs)': f"{entry.weight:.1f}"
+                }
+                for entry in recent_weights
+            ])
+            st.dataframe(weights_df, width='stretch')
+        else:
+            st.info("No weight data available")
+        
+        # LBM Data Preview
+        if not st.session_state.lbm_data.empty:
+            st.write("**Recent LBM Entries**")
+            st.dataframe(st.session_state.lbm_data.tail(10), width='stretch')
+        else:
+            st.info("No LBM data available")
 
 def get_bmi_category(bmi: float) -> str:
     """Get BMI category string"""
