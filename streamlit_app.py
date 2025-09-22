@@ -239,7 +239,7 @@ def show_dashboard():
                 )
             
             # Weight trend chart with Kalman filter and forecast extension
-            st.subheader("📈 Weight Trend (Kalman Filter)")
+            st.subheader("Weight Trend")
             
             # Create dense, smooth curves using the same approach as the original
             from kalman import compute_kalman_mean_std_spline
@@ -1172,8 +1172,19 @@ def show_data_management():
         
         if lbm_file is not None:
             try:
+                # Try to read the CSV file
                 df = pd.read_csv(lbm_file)
+                
+                # Check if we have the required columns
                 if 'date' in df.columns and 'lbm' in df.columns:
+                    # Validate data types
+                    try:
+                        df['lbm'] = pd.to_numeric(df['lbm'])
+                        df['date'] = pd.to_datetime(df['date'])
+                    except Exception as e:
+                        st.error(f"Error converting data types: {e}")
+                        return
+                    
                     # Save to data directory
                     data_dir = "data"
                     os.makedirs(data_dir, exist_ok=True)
@@ -1185,9 +1196,43 @@ def show_data_management():
                     st.success(f"Successfully uploaded {len(df)} LBM entries")
                     st.rerun()
                 else:
-                    st.error("CSV must have 'date' and 'lbm' columns")
+                    # Try to handle files without proper headers
+                    st.warning("CSV doesn't have 'date' and 'lbm' columns. Attempting to fix...")
+                    
+                    if len(df.columns) >= 2:
+                        # Assume first column is date, second is lbm
+                        df_fixed = pd.DataFrame()
+                        df_fixed['date'] = df.iloc[:, 0]
+                        df_fixed['lbm'] = pd.to_numeric(df.iloc[:, 1], errors='coerce')
+                        
+                        # Remove rows with invalid data
+                        df_fixed = df_fixed.dropna()
+                        
+                        if len(df_fixed) > 0:
+                            # Convert date column
+                            df_fixed['date'] = pd.to_datetime(df_fixed['date'], errors='coerce')
+                            df_fixed = df_fixed.dropna()
+                            
+                            if len(df_fixed) > 0:
+                                # Save the fixed file
+                                data_dir = "data"
+                                os.makedirs(data_dir, exist_ok=True)
+                                lbm_path = os.path.join(data_dir, "lbm.csv")
+                                df_fixed.to_csv(lbm_path, index=False)
+                                
+                                # Reload data
+                                load_data_files()
+                                st.success(f"Successfully uploaded {len(df_fixed)} LBM entries (auto-fixed format)")
+                                st.rerun()
+                            else:
+                                st.error("Could not parse dates in the CSV file")
+                        else:
+                            st.error("Could not parse LBM values in the CSV file")
+                    else:
+                        st.error("CSV must have at least 2 columns (date and lbm)")
             except Exception as e:
                 st.error(f"Error processing file: {e}")
+                st.info("Please ensure your CSV has 'date' and 'lbm' columns, or at least 2 columns with date in first column and LBM values in second column.")
     
     # Data summary
     st.subheader("📊 Data Summary")
