@@ -328,7 +328,7 @@ def main():
         st.header("📊 Navigation")
         page = st.selectbox(
             "Choose a page:",
-            ["🏠 Dashboard", "➕ Add Entries", "📈 Weight Analysis", "📊 Composition Analysis", "⚙️ Settings", "📁 Data Management", "⚠️ Disclaimer"]
+            ["🏠 Dashboard", "➕ Add Entries", "📈 Weight Analysis", "📊 Composition Analysis", "⚙️ Settings", "📁 Data Management", "📖 User Guide", "⚠️ Disclaimer"]
         )
         
         st.header("📋 Quick Stats")
@@ -353,6 +353,8 @@ def main():
         show_settings()
     elif page == "📁 Data Management":
         show_data_management()
+    elif page == "📖 User Guide":
+        show_user_guide()
     elif page == "⚠️ Disclaimer":
         show_disclaimer()
 
@@ -1098,32 +1100,32 @@ def show_weight_tracking():
                     )
                     
                     # Standard deviation lines
-                    fig_hist.add_vline(
-                        x=std_residual, 
-                        line_dash="dot", 
-                        line_color="orange",
-                        annotation_text=f"+1σ = {std_residual:.3f}"
-                    )
-                    fig_hist.add_vline(
-                        x=-std_residual, 
-                        line_dash="dot", 
-                        line_color="orange",
-                        annotation_text=f"-1σ = {-std_residual:.3f}"
-                    )
+                    # fig_hist.add_vline(
+                    #     x=std_residual, 
+                    #     line_dash="dot", 
+                    #     line_color="orange",
+                    #     annotation_text=f"+1σ = {std_residual:.3f}"
+                    # )
+                    # fig_hist.add_vline(
+                    #     x=-std_residual, 
+                    #     line_dash="dot", 
+                    #     line_color="orange",
+                    #     annotation_text=f"-1σ = {-std_residual:.3f}"
+                    # )
                     
                     # # Confidence interval lines
-                    # fig_hist.add_vline(
-                    #     x=ci_mult * std_residual, 
-                    #     line_dash="dot", 
-                    #     line_color="red",
-                    #     annotation_text=f"+{ci_mult:.1f}σ = {ci_mult * std_residual:.3f}"
-                    # )
-                    # fig_hist.add_vline(
-                    #     x=-ci_mult * std_residual, 
-                    #     line_dash="dot", 
-                    #     line_color="red",
-                    #     annotation_text=f"-{ci_mult:.1f}σ = {-ci_mult * std_residual:.3f}"
-                    # )
+                    fig_hist.add_vline(
+                        x=ci_mult * std_residual, 
+                        line_dash="dot", 
+                        line_color="red",
+                        annotation_text=f"+{ci_mult:.1f}σ = {ci_mult * std_residual:.3f}"
+                    )
+                    fig_hist.add_vline(
+                        x=-ci_mult * std_residual, 
+                        line_dash="dot", 
+                        line_color="red",
+                        annotation_text=f"-{ci_mult:.1f}σ = {-ci_mult * std_residual:.3f}"
+                    )
                     
                     fig_hist.update_layout(
                         title="Residuals Histogram (Kalman Filter vs Raw Data)",
@@ -1816,6 +1818,286 @@ def get_ffmi_category(ffmi: float, gender: str) -> str:
             return "Excellent"
         else:
             return "Exceptional"
+
+def show_user_guide():
+    """Display comprehensive user guide and documentation"""
+    st.header("User Guide")
+    
+    st.markdown("""
+    Welcome to BodyMetrics, a comprehensive fitness tracking application designed to help you monitor and analyze your weight, body composition, and fitness progress over time.
+    """)
+    
+    # Table of Contents
+    st.markdown("""
+    ## Table of Contents
+    
+    1. [Getting Started](#getting-started)
+    2. [Dashboard Overview](#dashboard-overview)
+    3. [Adding Data Entries](#adding-data-entries)
+    4. [Weight Analysis](#weight-analysis)
+    5. [Body Composition Analysis](#body-composition-analysis)
+    6. [Settings and Configuration](#settings-and-configuration)
+    7. [Data Management](#data-management)
+    8. [Understanding the Analytics](#understanding-the-analytics)
+    9. [Troubleshooting](#troubleshooting)
+    10. [Best Practices](#best-practices)
+    """)
+    
+    st.markdown("---")
+    
+    # Getting Started
+    st.markdown("""
+    ## Getting Started
+    
+    ### Initial Setup
+    1. **Authentication**: Log in with your credentials or create a new account
+    2. **Height Configuration**: Set your height in the Settings page (required for BMI calculations)
+    3. **First Data Entry**: Add your first weight measurement using the Add Entries page
+    
+    ### Navigation
+    Use the sidebar navigation to access different features:
+    - **Dashboard**: Overview of your current metrics and recent trends
+    - **Add Entries**: Input new weight, lean body mass, or body fat measurements
+    - **Weight Analysis**: Detailed weight tracking with advanced analytics
+    - **Composition Analysis**: Body composition metrics and trends
+    - **Settings**: Configure preferences and user information
+    - **Data Management**: Import, export, and manage your data files
+    - **User Guide**: This comprehensive guide
+    - **Disclaimer**: Important legal and health disclaimers
+    """)
+    
+    # Dashboard Overview
+    st.markdown("""
+    ## Dashboard Overview
+    
+    The Dashboard provides a high-level view of your fitness progress:
+    
+    ### Key Metrics
+    - **Current Weight**: Your most recent weight measurement
+    - **Weight Change**: Net change since your first entry
+    - **BMI**: Body Mass Index calculated from your height and current weight
+    - **Data Points**: Total number of measurements recorded
+    
+    ### Visual Elements
+    - **Weight Trend Chart**: Interactive plot showing your weight progression over time
+    - **Quick Stats**: Summary statistics in the sidebar
+    - **Recent Entries**: Latest data points for quick reference
+    """)
+    
+    # Adding Data Entries
+    st.markdown("""
+    ## Adding Data Entries
+    
+    ### Weight Entries
+    1. Navigate to **Add Entries** page
+    2. Select the **Weight Entry** tab
+    3. Choose the date and time of measurement
+    4. Enter your weight in pounds
+    5. Click **Add Weight Entry**
+    
+    ### Lean Body Mass (LBM) Entries
+    1. Select the **LBM Entry** tab
+    2. Enter the date and time
+    3. Input your lean body mass value
+    4. Click **Add LBM Entry**
+    
+    ### Body Fat Percentage Entries
+    1. Select the **Body Fat % Entry** tab
+    2. Enter the date and time
+    3. Input your body fat percentage
+    4. Click **Add Body Fat % Entry**
+    
+    ### Data Entry Tips
+    - **Consistency**: Measure at the same time of day for best results
+    - **Accuracy**: Use a reliable scale and ensure proper calibration
+    - **Frequency**: Daily measurements provide the most detailed tracking
+    - **Units**: All weights are in pounds; ensure your scale is set correctly
+    """)
+    
+    # Weight Analysis
+    st.markdown("""
+    ## Weight Analysis
+    
+    The Weight Analysis page provides advanced tracking and forecasting capabilities:
+    
+    ### Kalman Filter Analysis
+    - **Smoothed Trends**: Advanced filtering removes noise from daily fluctuations
+    - **Confidence Intervals**: Statistical confidence bands around trend predictions
+    - **Forecasting**: Projected weight trends based on current patterns
+    - **Velocity Analysis**: Rate of weight change over time
+    
+    ### Chart Features
+    - **Interactive Plots**: Zoom, pan, and hover for detailed information
+    - **Multiple Views**: Raw data, smoothed trends, and forecasts
+    - **Export Options**: Save charts as images for external use
+    
+    ### Settings
+    - **Confidence Levels**: Adjust statistical confidence intervals (1σ, 95%)
+    - **Forecast Period**: Set how far into the future to project trends
+    - **Filter Parameters**: Fine-tune the Kalman filter sensitivity
+    """)
+    
+    # Body Composition Analysis
+    st.markdown("""
+    ## Body Composition Analysis
+    
+    Track and analyze your body composition metrics:
+    
+    ### Available Metrics
+    - **Body Mass Index (BMI)**: Weight-to-height ratio indicator
+    - **Fat-Free Mass Index (FFMI)**: Lean mass relative to height
+    - **Body Fat Percentage**: Proportion of body weight that is fat
+    - **Lean Body Mass**: Total weight minus fat mass
+    
+    ### Analysis Features
+    - **Trend Visualization**: See how your composition changes over time
+    - **Category Classifications**: Understand where you fall in standard ranges
+    - **Correlation Analysis**: See relationships between different metrics
+    - **Goal Tracking**: Monitor progress toward composition targets
+    
+    ### Interpretation Guidelines
+    - **BMI Ranges**: Underweight (<18.5), Normal (18.5-24.9), Overweight (25-29.9), Obese (≥30)
+    - **FFMI Categories**: Below Average, Average, Above Average, Excellent, Exceptional
+    - **Body Fat Ranges**: Vary by age and gender; consult health professionals for guidance
+    """)
+    
+    # Settings and Configuration
+    st.markdown("""
+    ## Settings and Configuration
+    
+    ### User Profile
+    - **Height Setting**: Required for BMI and FFMI calculations
+    - **Gender Selection**: Affects body composition category ranges
+    - **Account Management**: Update login credentials and personal information
+    
+    ### Display Preferences
+    - **Chart Themes**: Choose between different visual styles
+    - **Date Formats**: Customize how dates are displayed
+    - **Units**: Currently supports imperial units (pounds, inches)
+    
+    ### Data Preferences
+    - **Default Entry Time**: Set standard time for new measurements
+    - **Auto-save Settings**: Configure automatic data saving behavior
+    - **Notification Preferences**: Set up alerts for data entry reminders
+    """)
+    
+    # Data Management
+    st.markdown("""
+    ## Data Management
+    
+    ### Importing Data
+    1. Navigate to **Data Management** page
+    2. Select **Import CSV** tab
+    3. Choose your CSV file (must have proper headers)
+    4. Map columns to data types (weight, LBM, body fat %)
+    5. Preview and confirm import
+    
+    ### Exporting Data
+    1. Select **Export Data** tab
+    2. Choose data type to export (weights, LBM, body fat %)
+    3. Select date range
+    4. Download CSV file
+    
+    ### Data Backup
+    - **Regular Exports**: Download your data regularly for backup
+    - **Multiple Formats**: Export in different formats for compatibility
+    - **Cloud Storage**: Consider storing backups in cloud services
+    
+    ### File Requirements
+    - **CSV Format**: Comma-separated values with headers
+    - **Date Format**: YYYY-MM-DD or MM/DD/YYYY
+    - **Time Format**: HH:MM (24-hour format)
+    - **Required Headers**: date, weight (for weight data)
+    """)
+    
+    # Understanding the Analytics
+    st.markdown("""
+    ## Understanding the Analytics
+    
+    ### Kalman Filter
+    The application uses a Kalman filter for advanced trend analysis:
+    - **Purpose**: Separates true trends from measurement noise
+    - **Benefits**: More accurate trend identification and forecasting
+    - **Parameters**: Automatically tuned for optimal performance
+    
+    ### Statistical Measures
+    - **Confidence Intervals**: Range where true value likely falls
+    - **Trend Velocity**: Rate of change over time
+    - **Forecast Accuracy**: How reliable future predictions are
+    
+    ### Chart Interpretation
+    - **Blue Line**: Raw data points
+    - **Red Line**: Smoothed trend (Kalman filter output)
+    - **Shaded Area**: Confidence interval around trend
+    - **Dashed Line**: Future forecast projection
+    """)
+    
+    # Troubleshooting
+    st.markdown("""
+    ## Troubleshooting
+    
+    ### Common Issues
+    
+    **Data Not Appearing**
+    - Check that you're logged in with the correct account
+    - Verify data was saved successfully after entry
+    - Refresh the page and try again
+    
+    **Charts Not Loading**
+    - Ensure you have sufficient data points (minimum 3-5 entries)
+    - Check your internet connection
+    - Try clearing browser cache
+    
+    **Import Errors**
+    - Verify CSV file format and headers
+    - Check date format compatibility
+    - Ensure no missing required fields
+    
+    **Performance Issues**
+    - Large datasets may load slowly
+    - Consider exporting old data to reduce file size
+    - Close other browser tabs to free memory
+    
+    ### Getting Help
+    - Check this User Guide for detailed instructions
+    - Review the Disclaimer for important information
+    - Contact support if issues persist
+    """)
+    
+    # Best Practices
+    st.markdown("""
+    ## Best Practices
+    
+    ### Data Collection
+    - **Consistent Timing**: Weigh yourself at the same time daily
+    - **Same Conditions**: Use the same scale, clothing, and environment
+    - **Regular Schedule**: Establish a routine for measurements
+    - **Accurate Recording**: Double-check values before saving
+    
+    ### Analysis and Interpretation
+    - **Focus on Trends**: Look at overall patterns, not daily fluctuations
+    - **Consider Context**: Account for factors like hydration, meals, exercise
+    - **Set Realistic Goals**: Aim for sustainable, healthy changes
+    - **Professional Guidance**: Consult healthcare providers for major decisions
+    
+    ### Data Management
+    - **Regular Backups**: Export data monthly
+    - **Multiple Copies**: Store backups in different locations
+    - **Version Control**: Keep track of data file versions
+    - **Privacy**: Protect your personal health information
+    
+    ### Health and Safety
+    - **Medical Consultation**: Seek professional advice for health decisions
+    - **Realistic Expectations**: Understand that weight fluctuates naturally
+    - **Holistic Approach**: Consider nutrition, exercise, and lifestyle factors
+    - **Mental Health**: Maintain a healthy relationship with body metrics
+    """)
+    
+    st.markdown("---")
+    
+    st.info("""
+    **Note**: This application is designed for informational purposes only. Always consult with qualified healthcare professionals before making significant changes to your diet, exercise routine, or health management plan.
+    """)
 
 def show_disclaimer():
     """Display disclaimer and terms of use"""
