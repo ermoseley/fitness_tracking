@@ -32,6 +32,15 @@ from kalman import (
 )
 
 # Utilities
+def get_confidence_multiplier(confidence_setting: str) -> float:
+    """Get the confidence multiplier based on the setting"""
+    if confidence_setting == "1σ":
+        return 1.0
+    elif confidence_setting == "95%":
+        return 1.96
+    else:
+        return 1.0  # Default to 1σ
+
 def ensure_py_datetime(dt: object) -> datetime:
     """Convert numpy/pandas datetime types to Python datetime."""
     try:
@@ -90,6 +99,8 @@ if 'forecast_days' not in st.session_state:
     st.session_state.forecast_days = 30  # Default forecast duration
 if 'enable_forecast' not in st.session_state:
     st.session_state.enable_forecast = True  # Default forecast enabled
+if 'confidence_interval' not in st.session_state:
+    st.session_state.confidence_interval = "1σ"  # Default to 1σ
 
 def load_data_files():
     """Load data from CSV files"""
@@ -194,11 +205,14 @@ def show_dashboard():
             # Display key metrics from Kalman filter
             col1, col2, col3, col4 = st.columns(4)
             
+            # Get confidence multiplier for error reporting
+            ci_mult = get_confidence_multiplier(st.session_state.confidence_interval)
+            
             with col1:
                 st.metric(
                     "Current Weight",
                     f"{latest_kalman.weight:.1f} lbs",
-                    f"±{latest_kalman.weight_var**0.5:.1f}"
+                    f"±{ci_mult * latest_kalman.weight_var**0.5:.1f}"
                 )
             
             with col2:
@@ -206,7 +220,7 @@ def show_dashboard():
                 st.metric(
                     "Weekly Rate",
                     f"{velocity_per_week:+.3f} lbs/week",
-                    f"±{7 * (latest_kalman.velocity_var**0.5):.3f}"
+                    f"±{ci_mult * 7 * (latest_kalman.velocity_var**0.5):.3f}"
                 )
             
             with col3:
@@ -285,23 +299,37 @@ def show_dashboard():
                 marker=dict(size=8, color='blue', opacity=0.7)
             ))
             
-            # Add dense Kalman estimate curve (historical + forecast)
+            # Add dense Kalman estimate curve (historical portion)
             fig.add_trace(go.Scatter(
-                x=combined_dates,
-                y=combined_means,
+                x=dense_datetimes,
+                y=dense_means,
                 mode='lines',
                 name='Kalman Estimate',
                 line=dict(color='red', width=2)
             ))
             
-            # Add smooth confidence intervals (historical + forecast)
-            ci_multiplier = 1.96  # 95% confidence
-            upper_bound = [mean + ci_multiplier * std for mean, std in zip(combined_means, combined_stds)]
-            lower_bound = [mean - ci_multiplier * std for mean, std in zip(combined_means, combined_stds)]
+            # Add forecast portion with dashed line and fading opacity
+            if st.session_state.enable_forecast:
+                # Create opacity gradient for forecast (fade from 1.0 to 0.3)
+                forecast_opacity = np.linspace(1.0, 0.3, len(forecast_weights))
+                
+                fig.add_trace(go.Scatter(
+                    x=forecast_dates,
+                    y=forecast_weights,
+                    mode='lines',
+                    name='Forecast',
+                    line=dict(color='red', width=2, dash='dash'),
+                    opacity=0.7  # Overall opacity for the trace
+                ))
+            
+            # Add smooth confidence intervals (historical portion)
+            ci_multiplier = get_confidence_multiplier(st.session_state.confidence_interval)
+            hist_upper_bound = [mean + ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
+            hist_lower_bound = [mean - ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
             
             fig.add_trace(go.Scatter(
-                x=combined_dates,
-                y=upper_bound,
+                x=dense_datetimes,
+                y=hist_upper_bound,
                 mode='lines',
                 line=dict(width=0),
                 showlegend=False,
@@ -309,15 +337,42 @@ def show_dashboard():
             ))
             
             fig.add_trace(go.Scatter(
-                x=combined_dates,
-                y=lower_bound,
+                x=dense_datetimes,
+                y=hist_lower_bound,
                 mode='lines',
                 line=dict(width=0),
                 fill='tonexty',
                 fillcolor='rgba(255,0,0,0.2)',
-                name='95% Confidence',
+                name=f'{st.session_state.confidence_interval} Confidence',
                 hoverinfo='skip'
             ))
+            
+            # Add forecast confidence intervals with fading opacity
+            if st.session_state.enable_forecast:
+                forecast_upper_bound = [mean + ci_multiplier * std for mean, std in zip(forecast_weights, forecast_uncertainties)]
+                forecast_lower_bound = [mean - ci_multiplier * std for mean, std in zip(forecast_weights, forecast_uncertainties)]
+                
+                fig.add_trace(go.Scatter(
+                    x=forecast_dates,
+                    y=forecast_upper_bound,
+                    mode='lines',
+                    line=dict(width=0),
+                    showlegend=False,
+                    hoverinfo='skip',
+                    opacity=0.5
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=forecast_dates,
+                    y=forecast_lower_bound,
+                    mode='lines',
+                    line=dict(width=0),
+                    fill='tonexty',
+                    fillcolor='rgba(255,0,0,0.1)',
+                    name=f'Forecast {st.session_state.confidence_interval} CI',
+                    hoverinfo='skip',
+                    opacity=0.5
+                ))
             
             # Note: We avoid add_vline with datetime here due to compatibility issues
             # in some Plotly versions. The forecast joins smoothly from the last
@@ -358,7 +413,7 @@ def show_dashboard():
                     st.metric(
                         "1-Week Forecast",
                         f"{week_forecast:.2f} lbs",
-                        f"±{ci_multiplier * week_std:.2f}"
+                        f"±{ci_mult * week_std:.2f}"
                     )
                 
                 with col2:
@@ -366,7 +421,7 @@ def show_dashboard():
                     st.metric(
                         "1-Month Forecast",
                         f"{month_forecast:.2f} lbs",
-                        f"±{ci_multiplier * month_std:.2f}"
+                        f"±{ci_mult * month_std:.2f}"
                     )
             
             # Recent entries table with Kalman estimates
@@ -453,11 +508,14 @@ def show_weight_tracking():
                 
                 col1, col2, col3 = st.columns(3)
                 
+                # Get confidence multiplier for error reporting
+                ci_mult = get_confidence_multiplier(st.session_state.confidence_interval)
+                
                 with col1:
                     st.metric(
                         "Kalman Weight Estimate",
                         f"{latest_kalman.weight:.2f} lbs",
-                        f"±{latest_kalman.weight_var**0.5:.2f}"
+                        f"±{ci_mult * latest_kalman.weight_var**0.5:.2f}"
                     )
                 
                 with col2:
@@ -465,7 +523,7 @@ def show_weight_tracking():
                     st.metric(
                         "Weekly Rate",
                         f"{velocity_per_week:+.3f} lbs/week",
-                        f"±{7 * (latest_kalman.velocity_var**0.5):.3f}"
+                        f"±{ci_mult * 7 * (latest_kalman.velocity_var**0.5):.3f}"
                     )
                 
                 with col3:
@@ -513,7 +571,7 @@ def show_weight_tracking():
                 ), row=1, col=1)
                 
                 # Add smooth confidence intervals
-                ci_multiplier = 1.96  # 95% confidence
+                ci_multiplier = get_confidence_multiplier(st.session_state.confidence_interval)
                 upper_bound = [mean + ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
                 lower_bound = [mean - ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
                 
@@ -530,11 +588,11 @@ def show_weight_tracking():
                     x=dense_datetimes,
                     y=lower_bound,
                     mode='lines',
-                    fill='tonexty',
-                    fillcolor='rgba(255,0,0,0.2)',
-                    line=dict(width=0),
-                    name='95% Confidence',
-                    hoverinfo='skip'
+                fill='tonexty',
+                fillcolor='rgba(255,0,0,0.2)',
+                line=dict(width=0),
+                name=f'{st.session_state.confidence_interval} Confidence',
+                hoverinfo='skip'
                 ), row=1, col=1)
                 
                 # Add velocity plot with dense sampling
@@ -597,7 +655,7 @@ def show_weight_tracking():
                     fill='tonexty',
                     fillcolor='rgba(0,255,0,0.2)',
                     line=dict(width=0),
-                    name='Velocity 95% CI',
+                    name=f'Velocity {st.session_state.confidence_interval} CI',
                     hoverinfo='skip'
                 ), row=2, col=1)
                 
@@ -692,11 +750,11 @@ def show_weight_tracking():
                         x=forecast_dates,
                         y=forecast_lower,
                         mode='lines',
-                        fill='tonexty',
-                        fillcolor='rgba(128,0,128,0.2)',
-                        line=dict(width=0),
-                        name='Forecast 95% CI',
-                        hoverinfo='skip'
+                    fill='tonexty',
+                    fillcolor='rgba(128,0,128,0.2)',
+                    line=dict(width=0),
+                    name=f'Forecast {st.session_state.confidence_interval} CI',
+                    hoverinfo='skip'
                     ))
                     
                     forecast_fig.update_layout(
@@ -716,7 +774,7 @@ def show_weight_tracking():
                         st.metric(
                             "1-Week Forecast",
                             f"{week_forecast:.2f} lbs",
-                            f"±{ci_multiplier * week_std:.2f}"
+                            f"±{ci_mult * week_std:.2f}"
                         )
                     
                     with col2:
@@ -724,7 +782,7 @@ def show_weight_tracking():
                         st.metric(
                             "1-Month Forecast",
                             f"{month_forecast:.2f} lbs",
-                            f"±{ci_multiplier * month_std:.2f}"
+                            f"±{ci_mult * month_std:.2f}"
                         )
         
         except Exception as e:
@@ -986,9 +1044,15 @@ def show_settings():
         
         confidence_interval = st.selectbox(
             "Confidence Interval",
-            ["95%", "1σ"],
+            ["1σ", "95%"],
+            index=0 if st.session_state.confidence_interval == "1σ" else 1,
             help="Confidence level for uncertainty bands"
         )
+        
+        # Update session state immediately when changed
+        if confidence_interval != st.session_state.confidence_interval:
+            st.session_state.confidence_interval = confidence_interval
+            st.rerun()
     
     st.subheader("📊 Plot Settings")
     
@@ -1005,7 +1069,7 @@ def show_settings():
         
         enable_forecast = st.checkbox(
             "Enable Forecasting",
-            value=True,
+            value=st.session_state.enable_forecast,
             help="Show forecast projections on plots"
         )
         
@@ -1013,18 +1077,25 @@ def show_settings():
             "Forecast Duration (days)",
             min_value=7,
             max_value=90,
-            value=30,
+            value=st.session_state.forecast_days,
             help="Number of days to forecast into the future"
         )
+        
+        # Update session state immediately when changed
+        if enable_forecast != st.session_state.enable_forecast:
+            st.session_state.enable_forecast = enable_forecast
+            st.rerun()
+        
+        if forecast_days != st.session_state.forecast_days:
+            st.session_state.forecast_days = forecast_days
+            st.rerun()
     
     with col2:
         st.info("**Note**: This app uses Kalman filtering as the primary analysis method, which automatically provides optimal smoothing and trend estimation.")
     
     if st.button("Save Settings", type="primary"):
-        # Save forecast settings to session state
-        st.session_state.forecast_days = forecast_days
-        st.session_state.enable_forecast = enable_forecast
-        st.success("Settings saved! Forecast settings will be applied to all plots.")
+        # Settings are already saved automatically when changed
+        st.success("Settings are automatically applied when changed!")
     
     st.subheader("📁 Data Export")
     
