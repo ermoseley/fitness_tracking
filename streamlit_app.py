@@ -104,6 +104,7 @@ if 'confidence_interval' not in st.session_state:
 if 'residuals_bins' not in st.session_state:
     st.session_state.residuals_bins = 15  # Default number of bins for residuals histogram
 
+
 def load_data_files():
     """Load data from CSV files"""
     data_dir = "data"
@@ -421,32 +422,24 @@ def show_dashboard():
                     )
                 
                 with col2:
-                    month_forecast, month_std = kf.forecast(30.0)
+                    forecast_days = st.session_state.forecast_days
+                    forecast_value, forecast_std = kf.forecast(float(forecast_days))
                     st.metric(
-                        "1-Month Forecast",
-                        f"{month_forecast:.2f} lbs",
-                        f"±{ci_mult * month_std:.2f}"
+                        f"{forecast_days}-Day Forecast",
+                        f"{forecast_value:.2f} lbs",
+                        f"±{ci_mult * forecast_std:.2f}"
                     )
             
-            # Recent entries table with Kalman estimates
+            # Recent entries table
             st.subheader("📋 Recent Entries")
             recent_entries = entries[-10:]  # Last 10 entries
             
-            # Interpolate Kalman estimates to match entry dates using dense data
-            from scipy.interpolate import interp1d
-            kalman_interp = interp1d(
-                [(d - dense_datetimes[0]).total_seconds() for d in dense_datetimes],
-                dense_means,
-                kind='linear',
-                bounds_error=False,
-                fill_value='extrapolate'
-            )
-            
+            # Simple table without Kalman interpolation (for dashboard)
             df_recent = pd.DataFrame([
                 {
                     'Date': entry.entry_datetime.strftime('%Y-%m-%d %H:%M'),
                     'Weight (lbs)': f"{entry.weight:.1f}",
-                    'Kalman Est.': f"{kalman_interp((entry.entry_datetime - dense_datetimes[0]).total_seconds()):.1f}"
+                    'Days Since Start': f"{(entry.entry_datetime - first_entry.entry_datetime).days}"
                 }
                 for entry in recent_entries
             ])
@@ -1017,11 +1010,12 @@ def show_weight_tracking():
                         )
                     
                     with col2:
-                        month_forecast, month_std = kf.forecast(30.0)
+                        forecast_days = st.session_state.forecast_days
+                        forecast_value, forecast_std = kf.forecast(float(forecast_days))
                         st.metric(
-                            "1-Month Forecast",
-                            f"{month_forecast:.2f} lbs",
-                            f"±{ci_mult * month_std:.2f}"
+                            f"{forecast_days}-Day Forecast",
+                            f"{forecast_value:.2f} lbs",
+                            f"±{ci_mult * forecast_std:.2f}"
                         )
         
         except Exception as e:
@@ -1257,39 +1251,11 @@ def show_settings():
     """Settings and configuration page"""
     st.header("⚙️ Settings")
     
-    st.subheader("🔧 Kalman Filter Parameters")
+    st.subheader("📊 Analysis Settings")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        process_noise_weight = st.slider(
-            "Process Noise (Weight)",
-            min_value=0.001,
-            max_value=0.1,
-            value=0.01,
-            step=0.001,
-            help="Higher values allow more weight variation"
-        )
-        
-        process_noise_velocity = st.slider(
-            "Process Noise (Velocity)",
-            min_value=0.0001,
-            max_value=0.01,
-            value=0.001,
-            step=0.0001,
-            help="Higher values allow more velocity variation"
-        )
-    
-    with col2:
-        measurement_noise = st.slider(
-            "Measurement Noise",
-            min_value=0.1,
-            max_value=2.0,
-            value=0.5,
-            step=0.1,
-            help="Expected measurement uncertainty"
-        )
-        
         confidence_interval = st.selectbox(
             "Confidence Interval",
             ["1σ", "95%"],
@@ -1301,6 +1267,9 @@ def show_settings():
         if confidence_interval != st.session_state.confidence_interval:
             st.session_state.confidence_interval = confidence_interval
             st.rerun()
+    
+    with col2:
+        st.info("**Note**: This app uses optimized Kalman filtering with carefully tuned parameters for best results.")
     
     st.subheader("📊 Plot Settings")
     
