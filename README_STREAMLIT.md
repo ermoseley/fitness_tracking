@@ -16,7 +16,7 @@ A modern web-based fitness tracking application built with Streamlit, featuring 
 - Advanced trend analysis and forecasting
 - Interactive charts with Plotly
 
-### 📊 Body Composition
+### 📊 Composition Analysis
 - BMI calculation and trend analysis
 - Body fat percentage tracking (requires LBM data)
 - Height management

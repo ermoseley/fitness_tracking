@@ -177,10 +177,15 @@ def load_data_files():
         try:
             df = pd.read_csv(lbm_path)
             if 'date' in df.columns and 'lbm' in df.columns:
-                st.session_state.lbm_data = df
+                # Filter out any empty rows
+                df = df.dropna(subset=['date', 'lbm'])
+                if len(df) > 0:
+                    st.session_state.lbm_data = df
+                else:
+                    st.session_state.lbm_data = pd.DataFrame()
             else:
                 st.session_state.lbm_data = pd.DataFrame()
-        except:
+        except Exception as e:
             st.session_state.lbm_data = pd.DataFrame()
     else:
         st.session_state.lbm_data = pd.DataFrame()
@@ -233,7 +238,7 @@ def main():
         st.header("📊 Navigation")
         page = st.selectbox(
             "Choose a page:",
-            ["🏠 Dashboard", "➕ Add Entries", "📈 Weight Analysis", "📊 Body Composition", "⚙️ Settings", "📁 Data Management"]
+            ["🏠 Dashboard", "➕ Add Entries", "📈 Weight Analysis", "📊 Composition Analysis", "⚙️ Settings", "📁 Data Management"]
         )
         
         st.header("📋 Quick Stats")
@@ -252,7 +257,7 @@ def main():
         show_add_entries()
     elif page == "📈 Weight Analysis":
         show_weight_tracking()
-    elif page == "📊 Body Composition":
+    elif page == "📊 Composition Analysis":
         show_body_composition()
     elif page == "⚙️ Settings":
         show_settings()
@@ -1098,7 +1103,7 @@ def show_weight_tracking():
 
 def show_body_composition():
     """Body composition analysis page"""
-    st.header("📊 Body Composition Analysis")
+    st.header("📊 Composition Analysis Analysis")
     
     if not st.session_state.weights_data:
         st.warning("No weight data available. Please add some weight entries first.")
