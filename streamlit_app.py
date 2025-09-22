@@ -158,7 +158,7 @@ def main():
         st.header("📊 Navigation")
         page = st.selectbox(
             "Choose a page:",
-            ["🏠 Dashboard", "📈 Weight Tracking", "📊 Body Composition", "⚙️ Settings", "📁 Data Management"]
+            ["🏠 Dashboard", "➕ Add Entries", "📈 Weight Tracking", "📊 Body Composition", "⚙️ Settings", "📁 Data Management"]
         )
         
         st.header("📋 Quick Stats")
@@ -173,6 +173,8 @@ def main():
     # Main content based on selected page
     if page == "🏠 Dashboard":
         show_dashboard()
+    elif page == "➕ Add Entries":
+        show_add_entries()
     elif page == "📈 Weight Tracking":
         show_weight_tracking()
     elif page == "📊 Body Composition":
@@ -459,41 +461,137 @@ def show_dashboard():
         st.metric("Total Entries", len(entries))
         return
 
-def show_weight_tracking():
-    """Weight tracking page with entry form and detailed analysis"""
-    st.header("📈 Weight Tracking")
+def show_add_entries():
+    """Dedicated page for adding new entries"""
+    st.header("➕ Add New Entries")
+    st.write("Add weight measurements, lean body mass (LBM), or body fat percentage data.")
     
-    # Add new weight entry
-    st.subheader("➕ Add New Weight Entry")
+    # Create tabs for different entry types
+    tab1, tab2, tab3 = st.tabs(["Weight Entry", "LBM Entry", "Body Fat % Entry"])
     
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Date and time input
-        entry_date = st.date_input("Date", value=date.today())
-        entry_time = st.time_input("Time", value=datetime.now().time())
-        entry_datetime = datetime.combine(entry_date, entry_time)
-    
-    with col2:
-        weight_value = st.number_input("Weight (lbs)", min_value=50.0, max_value=500.0, value=150.0, step=0.1)
+    with tab1:
+        st.write("**Add Weight Entry**")
+        col1, col2 = st.columns([2, 1])
         
-        if st.button("Add Entry", type="primary"):
-            if weight_value > 0:
-                # Create weight entry
-                entry = WeightEntry(entry_datetime, weight_value)
-                
-                # Save to CSV
-                data_dir = "data"
-                os.makedirs(data_dir, exist_ok=True)
-                weights_path = os.path.join(data_dir, "weights.csv")
-                append_entry(weights_path, entry)
-                
-                # Reload data
-                load_data_files()
-                st.success(f"Weight entry added: {weight_value} lbs on {entry_datetime.strftime('%Y-%m-%d %H:%M')}")
-                st.rerun()
-            else:
-                st.error("Please enter a valid weight value")
+        with col1:
+            # Date and time input (default to today, 9:00 AM)
+            entry_date = st.date_input("Date", value=date.today(), key="weight_date")
+            entry_time = st.time_input("Time", value=datetime.strptime("09:00", "%H:%M").time(), key="weight_time")
+            entry_datetime = datetime.combine(entry_date, entry_time)
+        
+        with col2:
+            weight_value = st.number_input("Weight (lbs)", min_value=50.0, max_value=500.0, value=150.0, step=0.1, key="weight_value")
+            
+            if st.button("Add Weight Entry", type="primary", key="add_weight"):
+                if weight_value > 0:
+                    # Create weight entry
+                    entry = WeightEntry(entry_datetime, weight_value)
+                    
+                    # Save to CSV
+                    data_dir = "data"
+                    os.makedirs(data_dir, exist_ok=True)
+                    weights_path = os.path.join(data_dir, "weights.csv")
+                    append_entry(weights_path, entry)
+                    
+                    # Reload data
+                    load_data_files()
+                    st.success(f"Weight entry added: {weight_value} lbs on {entry_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    st.rerun()
+                else:
+                    st.error("Please enter a valid weight value")
+    
+    with tab2:
+        st.write("**Add LBM Entry**")
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Date and time input (default to today, 9:00 AM)
+            lbm_date = st.date_input("Date", value=date.today(), key="lbm_date")
+            lbm_time = st.time_input("Time", value=datetime.strptime("09:00", "%H:%M").time(), key="lbm_time")
+            lbm_datetime = datetime.combine(lbm_date, lbm_time)
+        
+        with col2:
+            lbm_value = st.number_input("LBM (lbs)", min_value=50.0, max_value=500.0, value=150.0, step=0.1, key="lbm_value")
+            
+            if st.button("Add LBM Entry", type="primary", key="add_lbm"):
+                if lbm_value > 0:
+                    # Save to LBM CSV
+                    data_dir = "data"
+                    os.makedirs(data_dir, exist_ok=True)
+                    lbm_path = os.path.join(data_dir, "lbm.csv")
+                    
+                    # Check if file exists and has content
+                    need_header = not os.path.exists(lbm_path) or os.path.getsize(lbm_path) == 0
+                    
+                    # Add entry to CSV
+                    with open(lbm_path, "a", newline="") as f:
+                        if need_header:
+                            f.write("date,lbm\n")
+                        f.write(f"{lbm_datetime.isoformat()},{lbm_value}\n")
+                    
+                    # Reload data
+                    load_data_files()
+                    st.success(f"LBM entry added: {lbm_value} lbs on {lbm_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    st.rerun()
+                else:
+                    st.error("Please enter a valid LBM value")
+    
+    with tab3:
+        st.write("**Add Body Fat % Entry**")
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Date and time input (default to today, 9:00 AM)
+            bf_date = st.date_input("Date", value=date.today(), key="bf_date")
+            bf_time = st.time_input("Time", value=datetime.strptime("09:00", "%H:%M").time(), key="bf_time")
+            bf_datetime = datetime.combine(bf_date, bf_time)
+        
+        with col2:
+            bf_value = st.number_input("Body Fat %", min_value=0.0, max_value=100.0, value=15.0, step=0.1, key="bf_value")
+            
+            if st.button("Add Body Fat % Entry", type="primary", key="add_bf"):
+                if 0 <= bf_value <= 100:
+                    # Calculate LBM from current weight estimate and body fat %
+                    if st.session_state.weights_data:
+                        try:
+                            # Get current weight estimate using Kalman filter
+                            kalman_states, kalman_dates = run_kalman_smoother(st.session_state.weights_data)
+                            if kalman_states:
+                                current_weight = kalman_states[-1].weight
+                                
+                                # Calculate LBM: LBM = weight * (1 - body_fat_percent/100)
+                                lbm = current_weight * (1.0 - bf_value / 100.0)
+                                
+                                # Save to LBM CSV
+                                data_dir = "data"
+                                os.makedirs(data_dir, exist_ok=True)
+                                lbm_path = os.path.join(data_dir, "lbm.csv")
+                                
+                                # Check if file exists and has content
+                                need_header = not os.path.exists(lbm_path) or os.path.getsize(lbm_path) == 0
+                                
+                                # Add entry to CSV
+                                with open(lbm_path, "a", newline="") as f:
+                                    if need_header:
+                                        f.write("date,lbm\n")
+                                    f.write(f"{bf_datetime.isoformat()},{lbm:.2f}\n")
+                                
+                                # Reload data
+                                load_data_files()
+                                st.success(f"Body fat entry added: {bf_value}% (LBM: {lbm:.1f} lbs) on {bf_datetime.strftime('%Y-%m-%d %H:%M')}")
+                                st.rerun()
+                            else:
+                                st.error("Failed to get current weight estimate. Please add weight entries first.")
+                        except Exception as e:
+                            st.error(f"Error calculating LBM: {e}")
+                    else:
+                        st.error("No weight data available. Please add weight entries first.")
+                else:
+                    st.error("Body fat percentage must be between 0 and 100")
+
+def show_weight_tracking():
+    """Weight tracking page with detailed analysis"""
+    st.header("📈 Weight Tracking")
     
     # Display current data
     if st.session_state.weights_data:
@@ -610,7 +708,7 @@ def show_weight_tracking():
                 # Create dense time grid (same as in compute_kalman_mean_std_spline)
                 min_t = float(np.min(t_entry_days))
                 max_t = float(np.max(t_entry_days))
-                dense_t = np.linspace(min_t, max_t, 5000)
+                dense_t = np.linspace(min_t, max_t, 10000)
                 
                 # Interpolate velocity and its uncertainty
                 try:
@@ -846,16 +944,24 @@ def show_body_composition():
             with col3:
                 st.metric("Height", f"{height_inches:.1f} inches")
             
-            # BMI trend chart
+            # BMI trend chart with dense Kalman sampling
+            from kalman import compute_kalman_mean_std_spline
+            dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(kalman_states, kalman_dates)
+            
+            # Calculate BMI for dense Kalman data
+            dense_bmi_values = []
+            for weight in dense_means:
+                bmi = (weight * 703) / (height_inches ** 2)
+                dense_bmi_values.append(bmi)
+            
             fig = go.Figure()
             
             fig.add_trace(go.Scatter(
-                x=kalman_dates,
-                y=bmi_values,
-                mode='lines+markers',
-                name='BMI',
-                line=dict(color='blue', width=2),
-                marker=dict(size=6)
+                x=dense_datetimes,
+                y=dense_bmi_values,
+                mode='lines',
+                name='BMI (Kalman)',
+                line=dict(color='blue', width=2)
             ))
             
             # Add BMI category lines
@@ -881,78 +987,80 @@ def show_body_composition():
         st.subheader("🩸 Body Fat Analysis")
         
         try:
-            # Process LBM data
-            lbm_dates = pd.to_datetime(st.session_state.lbm_data['date'])
-            lbm_values = st.session_state.lbm_data['lbm'].values
+            # Use Kalman filter approach for body fat analysis
+            kalman_states, kalman_dates = run_kalman_smoother(st.session_state.weights_data)
             
-            # Calculate body fat percentage
-            # Need to interpolate LBM to match weight dates
-            weight_dates = [entry.entry_datetime for entry in st.session_state.weights_data]
-            weights = [entry.weight for entry in st.session_state.weights_data]
-            
-            # Interpolate LBM to weight measurement dates
-            from scipy.interpolate import interp1d
-            lbm_interp = interp1d(
-                (lbm_dates - lbm_dates[0]).dt.total_seconds(),
-                lbm_values,
-                kind='linear',
-                bounds_error=False,
-                fill_value='extrapolate'
-            )
-            
-            bf_percentages = []
-            lbm_interpolated = []
-            for i, (w_date, weight) in enumerate(zip(weight_dates, weights)):
-                if i == 0:
-                    continue
-                time_diff = (w_date - weight_dates[0]).total_seconds()
-                lbm = lbm_interp(time_diff)
-                lbm_interpolated.append(lbm)
-                bf_percent = ((weight - lbm) / weight) * 100
-                bf_percentages.append(bf_percent)
-            
-            if bf_percentages:
-                # Display current body fat
-                current_bf = bf_percentages[-1]
-                current_lbm = lbm_interpolated[-1]
-                bf_category = get_bf_category(current_bf, 'male')  # Assuming male for now
+            if kalman_states:
+                # Create dense, smooth curves using Kalman filter
+                from kalman import compute_kalman_mean_std_spline
+                dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(kalman_states, kalman_dates)
                 
-                col1, col2, col3 = st.columns(3)
+                # Process LBM data
+                lbm_dates = pd.to_datetime(st.session_state.lbm_data['date'], format='ISO8601')
+                lbm_values = st.session_state.lbm_data['lbm'].values
                 
-                with col1:
-                    st.metric("Current Body Fat %", f"{current_bf:.1f}%")
-                
-                with col2:
-                    st.metric("Body Fat Category", bf_category)
-                
-                with col3:
-                    st.metric("Current LBM", f"{current_lbm:.1f} lbs")
-                
-                # Body fat trend chart
-                fig = go.Figure()
-                
-                fig.add_trace(go.Scatter(
-                    x=weight_dates[1:],  # Skip first point since we can't calculate BF
-                    y=bf_percentages,
-                    mode='lines+markers',
-                    name='Body Fat %',
-                    line=dict(color='purple', width=2),
-                    marker=dict(size=6)
-                ))
-                
-                fig.update_layout(
-                    title="Body Fat Percentage Trend",
-                    xaxis_title="Date",
-                    yaxis_title="Body Fat %",
-                    height=500
+                # Interpolate LBM to dense Kalman dates
+                from scipy.interpolate import interp1d
+                lbm_interp = interp1d(
+                    (lbm_dates - lbm_dates[0]).dt.total_seconds(),
+                    lbm_values,
+                    kind='linear',
+                    bounds_error=False,
+                    fill_value='extrapolate'
                 )
                 
-                st.plotly_chart(fig, width='stretch')
+                # Calculate body fat percentages for dense Kalman data
+                bf_percentages = []
+                lbm_interpolated = []
+                for i, (dt, weight) in enumerate(zip(dense_datetimes, dense_means)):
+                    time_diff = (dt - dense_datetimes[0]).total_seconds()
+                    lbm = lbm_interp(time_diff)
+                    lbm_interpolated.append(lbm)
+                    bf_percent = ((weight - lbm) / weight) * 100
+                    bf_percentages.append(bf_percent)
+                
+                if bf_percentages:
+                    # Display current body fat
+                    current_bf = bf_percentages[-1]
+                    current_lbm = lbm_interpolated[-1]
+                    bf_category = get_bf_category(current_bf, 'male')  # Assuming male for now
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Current Body Fat %", f"{current_bf:.1f}%")
+                    
+                    with col2:
+                        st.metric("Body Fat Category", bf_category)
+                    
+                    with col3:
+                        st.metric("Current LBM", f"{current_lbm:.1f} lbs")
+                    
+                    # Body fat trend chart with Kalman smoothing (lines only)
+                    fig = go.Figure()
+                    
+                    # Add dense Kalman-smoothed body fat curve
+                    fig.add_trace(go.Scatter(
+                        x=dense_datetimes,
+                        y=bf_percentages,
+                        mode='lines',
+                        name='Body Fat % (Kalman)',
+                        line=dict(color='purple', width=2)
+                    ))
+                    
+                    fig.update_layout(
+                        title="Body Fat Percentage Trend (Kalman Filtered)",
+                        xaxis_title="Date",
+                        yaxis_title="Body Fat %",
+                        height=500
+                    )
+                    
+                    st.plotly_chart(fig, width='stretch')
                 
                 # FFMI Analysis
                 st.subheader("💪 FFMI Analysis")
                 
-                # Calculate FFMI (Fat-Free Mass Index)
+                # Calculate FFMI (Fat-Free Mass Index) using Kalman-smoothed data
                 ffmi_values = []
                 for lbm in lbm_interpolated:
                     # FFMI = LBM (kg) / height (m)²
@@ -972,16 +1080,15 @@ def show_body_composition():
                 with col2:
                     st.metric("FFMI Category", ffmi_category)
                 
-                # FFMI trend chart
+                # FFMI trend chart (lines only, no markers)
                 ffmi_fig = go.Figure()
                 
                 ffmi_fig.add_trace(go.Scatter(
-                    x=weight_dates[1:],
+                    x=dense_datetimes,
                     y=ffmi_values,
-                    mode='lines+markers',
-                    name='FFMI',
-                    line=dict(color='green', width=2),
-                    marker=dict(size=6)
+                    mode='lines',
+                    name='FFMI (Kalman)',
+                    line=dict(color='green', width=2)
                 ))
                 
                 # Add FFMI reference lines
@@ -991,7 +1098,7 @@ def show_body_composition():
                 ffmi_fig.add_hline(y=22, line_dash="dash", line_color="green", annotation_text="Excellent")
                 
                 ffmi_fig.update_layout(
-                    title="Fat-Free Mass Index (FFMI) Trend",
+                    title="Fat-Free Mass Index (FFMI) Trend (Kalman Filtered)",
                     xaxis_title="Date",
                     yaxis_title="FFMI",
                     height=500

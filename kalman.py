@@ -424,11 +424,16 @@ def interpolate_kalman_states(states,
     return interpolated_weights.tolist(), interpolated_velocities.tolist(), interpolated_stds.tolist()
 
 
-def compute_kalman_mean_std_spline(states, dates) -> Tuple[List[datetime], List[float], List[float]]:
+def compute_kalman_mean_std_spline(states, dates, n_points: int = 10000) -> Tuple[List[datetime], List[float], List[float]]:
     """
     Mirror the EMA spline approach from weight_tracker.py for Kalman outputs.
     Build a dense cubic spline for the filtered mean and for the std, using
     datetimes and a dense time grid for smooth plotting.
+
+    Args:
+        states: List of Kalman states
+        dates: List of datetime objects
+        n_points: Number of points for dense sampling (default: 10000)
 
     Returns: (dense_datetimes, dense_mean_values, dense_std_values)
     """
@@ -462,7 +467,7 @@ def compute_kalman_mean_std_spline(states, dates) -> Tuple[List[datetime], List[
     # Dense grid as in EMA (smooth curve)
     min_t = float(np.min(t_entry_days))
     max_t = float(np.max(t_entry_days))
-    dense_t = np.linspace(min_t, max_t, 5000)
+    dense_t = np.linspace(min_t, max_t, n_points)
 
     # Spline the mean and std (natural boundary), with robust fallbacks
     try:
