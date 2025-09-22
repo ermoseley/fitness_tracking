@@ -101,6 +101,8 @@ if 'enable_forecast' not in st.session_state:
     st.session_state.enable_forecast = True  # Default forecast enabled
 if 'confidence_interval' not in st.session_state:
     st.session_state.confidence_interval = "1σ"  # Default to 1σ
+if 'residuals_bins' not in st.session_state:
+    st.session_state.residuals_bins = 15  # Default number of bins for residuals histogram
 
 def load_data_files():
     """Load data from CSV files"""
@@ -591,6 +593,7 @@ def show_add_entries():
 
 def show_weight_tracking():
     """Weight tracking page with detailed analysis"""
+    from datetime import timedelta
     st.header("📈 Weight Tracking")
     
     # Display current data
@@ -639,13 +642,45 @@ def show_weight_tracking():
                 from kalman import compute_kalman_mean_std_spline
                 dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(kalman_states, kalman_dates)
                 
-                # Create subplot with velocity
-                fig = make_subplots(
-                    rows=2, cols=1,
-                    subplot_titles=('Weight Estimate', 'Velocity (Rate of Change)'),
-                    vertical_spacing=0.1,
-                    row_heights=[0.7, 0.3]
-                )
+                # Add forecast extension if enabled
+                if st.session_state.enable_forecast:
+                    # Calculate forecasts using the same approach as dashboard
+                    kf = WeightKalmanFilter(
+                        initial_weight=latest_kalman.weight,
+                        initial_velocity=latest_kalman.velocity,
+                        initial_weight_var=latest_kalman.weight_var,
+                        initial_velocity_var=latest_kalman.velocity_var,
+                    )
+                    kf.x = np.array([latest_kalman.weight, latest_kalman.velocity], dtype=float)
+                    kf.P = np.array([
+                        [latest_kalman.weight_var, latest_kalman.weight_velocity_cov],
+                        [latest_kalman.weight_velocity_cov, latest_kalman.velocity_var],
+                    ], dtype=float)
+                    
+                    # Generate forecast data using configurable duration
+                    forecast_days = int(st.session_state.forecast_days)
+                    latest_date = ensure_py_datetime(dense_datetimes[-1])
+                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(1, forecast_days + 1)]
+                    forecast_weights = []
+                    forecast_uncertainties = []
+                    
+                    for i in range(1, forecast_days + 1):
+                        weight, std = kf.forecast(float(i))
+                        forecast_weights.append(weight)
+                        forecast_uncertainties.append(std)
+                    
+                    # Combine historical and forecast data
+                    combined_dates = list(dense_datetimes) + list(forecast_dates)
+                    combined_means = list(dense_means) + list(forecast_weights)
+                    combined_stds = list(dense_stds) + list(forecast_uncertainties)
+                else:
+                    # No forecast, just use historical data
+                    combined_dates = dense_datetimes
+                    combined_means = dense_means
+                    combined_stds = dense_stds
+                
+                # Create single plot (matching dashboard style)
+                fig = go.Figure()
                 
                 # Add original data points
                 dates = [entry.entry_datetime for entry in st.session_state.weights_data]
@@ -657,43 +692,95 @@ def show_weight_tracking():
                     mode='markers',
                     name='Weight Measurements',
                     marker=dict(size=8, color='blue', opacity=0.7)
-                ), row=1, col=1)
+                ))
                 
-                # Add dense Kalman estimate curve
+                # Add dense Kalman estimate curve (historical portion)
                 fig.add_trace(go.Scatter(
                     x=dense_datetimes,
                     y=dense_means,
                     mode='lines',
                     name='Kalman Estimate',
                     line=dict(color='red', width=2)
-                ), row=1, col=1)
+                ))
                 
-                # Add smooth confidence intervals
+                # Add forecast portion with dashed line and fading opacity
+                if st.session_state.enable_forecast:
+                    fig.add_trace(go.Scatter(
+                        x=forecast_dates,
+                        y=forecast_weights,
+                        mode='lines',
+                        name='Forecast',
+                        line=dict(color='red', width=2, dash='dash'),
+                        opacity=0.7  # Overall opacity for the trace
+                    ))
+                
+                # Add smooth confidence intervals (historical portion)
                 ci_multiplier = get_confidence_multiplier(st.session_state.confidence_interval)
-                upper_bound = [mean + ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
-                lower_bound = [mean - ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
+                hist_upper_bound = [mean + ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
+                hist_lower_bound = [mean - ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
                 
                 fig.add_trace(go.Scatter(
                     x=dense_datetimes,
-                    y=upper_bound,
+                    y=hist_upper_bound,
                     mode='lines',
                     line=dict(width=0),
                     showlegend=False,
                     hoverinfo='skip'
-                ), row=1, col=1)
+                ))
                 
                 fig.add_trace(go.Scatter(
                     x=dense_datetimes,
-                    y=lower_bound,
+                    y=hist_lower_bound,
                     mode='lines',
-                fill='tonexty',
-                fillcolor='rgba(255,0,0,0.2)',
-                line=dict(width=0),
-                name=f'{st.session_state.confidence_interval} Confidence',
-                hoverinfo='skip'
-                ), row=1, col=1)
+                    line=dict(width=0),
+                    fill='tonexty',
+                    fillcolor='rgba(255,0,0,0.2)',
+                    name=f'{st.session_state.confidence_interval} Confidence',
+                    hoverinfo='skip'
+                ))
                 
-                # Add velocity plot with dense sampling
+                # Add forecast confidence intervals with fading opacity
+                if st.session_state.enable_forecast:
+                    forecast_upper_bound = [mean + ci_multiplier * std for mean, std in zip(forecast_weights, forecast_uncertainties)]
+                    forecast_lower_bound = [mean - ci_multiplier * std for mean, std in zip(forecast_weights, forecast_uncertainties)]
+                    
+                    fig.add_trace(go.Scatter(
+                        x=forecast_dates,
+                        y=forecast_upper_bound,
+                        mode='lines',
+                        line=dict(width=0),
+                        showlegend=False,
+                        hoverinfo='skip',
+                        opacity=0.5
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=forecast_dates,
+                        y=forecast_lower_bound,
+                        mode='lines',
+                        line=dict(width=0),
+                        fill='tonexty',
+                        fillcolor='rgba(255,0,0,0.1)',
+                        name=f'Forecast {st.session_state.confidence_interval} CI',
+                        hoverinfo='skip',
+                        opacity=0.5
+                    ))
+                
+                
+                fig.update_layout(
+                    title="Kalman Filter Analysis: Weight Trend",
+                    height=500,
+                    hovermode='x unified'
+                )
+                
+                fig.update_xaxes(title_text="Date")
+                fig.update_yaxes(title_text="Weight (lbs)")
+                
+                st.plotly_chart(fig, width='stretch')
+                
+                # Velocity plot with dense sampling
+                st.subheader("📈 Velocity Analysis")
+                
                 # Create dense velocity curves
                 velocities = [state.velocity for state in kalman_states]
                 velocity_stds = [state.velocity_var**0.5 for state in kalman_states]
@@ -722,31 +809,36 @@ def show_weight_tracking():
                     dense_velocity_stds = np.interp(dense_t, t_entry_days, velocity_std_vals)
                 
                 # Convert back to datetime
-                from datetime import timedelta
                 dense_velocity_datetimes = [t0 + timedelta(days=float(td)) for td in dense_t]
                 
-                fig.add_trace(go.Scatter(
+                # Convert velocity from lbs/day to lbs/week
+                dense_velocities_weekly = [v * 7 for v in dense_velocities]
+                
+                # Create velocity plot
+                velocity_fig = go.Figure()
+                
+                velocity_fig.add_trace(go.Scatter(
                     x=dense_velocity_datetimes,
-                    y=dense_velocities,
+                    y=dense_velocities_weekly,
                     mode='lines',
                     name='Velocity',
                     line=dict(color='green', width=2)
-                ), row=2, col=1)
+                ))
                 
-                # Add velocity confidence interval
-                velocity_upper = [v + ci_multiplier * std for v, std in zip(dense_velocities, dense_velocity_stds)]
-                velocity_lower = [v - ci_multiplier * std for v, std in zip(dense_velocities, dense_velocity_stds)]
+                # Add velocity confidence interval (convert to lbs/week)
+                velocity_upper = [(v + ci_multiplier * std) * 7 for v, std in zip(dense_velocities, dense_velocity_stds)]
+                velocity_lower = [(v - ci_multiplier * std) * 7 for v, std in zip(dense_velocities, dense_velocity_stds)]
                 
-                fig.add_trace(go.Scatter(
+                velocity_fig.add_trace(go.Scatter(
                     x=dense_velocity_datetimes,
                     y=velocity_upper,
                     mode='lines',
                     line=dict(width=0),
                     showlegend=False,
                     hoverinfo='skip'
-                ), row=2, col=1)
+                ))
                 
-                fig.add_trace(go.Scatter(
+                velocity_fig.add_trace(go.Scatter(
                     x=dense_velocity_datetimes,
                     y=velocity_lower,
                     mode='lines',
@@ -755,26 +847,151 @@ def show_weight_tracking():
                     line=dict(width=0),
                     name=f'Velocity {st.session_state.confidence_interval} CI',
                     hoverinfo='skip'
-                ), row=2, col=1)
+                ))
                 
                 # Add zero line for velocity
-                fig.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=1)
+                velocity_fig.add_hline(y=0, line_dash="dash", line_color="gray")
                 
-                fig.update_layout(
-                    title="Kalman Filter Analysis: Weight and Velocity",
-                    height=700,
-                    hovermode='x unified'
+                velocity_fig.update_layout(
+                    title="Weight Change Velocity",
+                    height=400,
+                    hovermode='x unified',
+                    yaxis=dict(range=[-3, 3])  # Set y-range to -3 to +3 lbs/week
                 )
                 
-                fig.update_xaxes(title_text="Date", row=2, col=1)
-                fig.update_yaxes(title_text="Weight (lbs)", row=1, col=1)
-                fig.update_yaxes(title_text="Velocity (lbs/day)", row=2, col=1)
+                velocity_fig.update_xaxes(title_text="Date")
+                velocity_fig.update_yaxes(title_text="Velocity (lbs/week)")
                 
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(velocity_fig, width='stretch')
                 
-                # Forecast section (only if enabled)
+                # Residuals analysis
+                st.subheader("📊 Residuals Analysis")
+                st.write("Analysis of differences between raw weight measurements and Kalman filter estimates")
+                
+                # Compute residuals
+                from kalman import compute_residuals
+                residuals = compute_residuals(st.session_state.weights_data, kalman_states, kalman_dates)
+                
+                if residuals:
+                    residuals_array = np.array(residuals)
+                    mean_residual = np.mean(residuals_array)
+                    std_residual = np.std(residuals_array, ddof=1)  # Sample standard deviation
+                    
+                    # Create residuals histogram using Plotly
+                    import plotly.figure_factory as ff
+                    from scipy import stats
+                    
+                    # Create histogram data
+                    hist_data = [residuals_array]
+                    group_labels = [f'Residuals (n={len(residuals_array)})']
+                    
+                    # Create histogram with user-configurable number of bins
+                    data_range = residuals_array.max() - residuals_array.min()
+                    bin_size = data_range / st.session_state.residuals_bins
+                    
+                    fig_hist = ff.create_distplot(
+                        hist_data, 
+                        group_labels, 
+                        bin_size=bin_size,
+                        show_curve=True,
+                        show_rug=False
+                    )
+                    
+                    # Add normal distribution overlay
+                    x_range = np.linspace(residuals_array.min(), residuals_array.max(), 100)
+                    normal_dist = stats.norm.pdf(x_range, loc=0, scale=std_residual)
+                    
+                    fig_hist.add_trace(go.Scatter(
+                        x=x_range,
+                        y=normal_dist,
+                        mode='lines',
+                        name=f'Normal(μ=0, σ={std_residual:.3f})',
+                        line=dict(color='red', width=2)
+                    ))
+                    
+                    # Add vertical lines for statistics
+                    ci_mult = get_confidence_multiplier(st.session_state.confidence_interval)
+                    
+                    # Mean line
+                    fig_hist.add_vline(
+                        x=mean_residual, 
+                        line_dash="dash", 
+                        line_color="green",
+                        annotation_text=f"Mean = {mean_residual:.3f}"
+                    )
+                    
+                    # Standard deviation lines
+                    fig_hist.add_vline(
+                        x=std_residual, 
+                        line_dash="dot", 
+                        line_color="orange",
+                        annotation_text=f"+1σ = {std_residual:.3f}"
+                    )
+                    fig_hist.add_vline(
+                        x=-std_residual, 
+                        line_dash="dot", 
+                        line_color="orange",
+                        annotation_text=f"-1σ = {-std_residual:.3f}"
+                    )
+                    
+                    # Confidence interval lines
+                    fig_hist.add_vline(
+                        x=ci_mult * std_residual, 
+                        line_dash="dot", 
+                        line_color="red",
+                        annotation_text=f"+{ci_mult:.1f}σ = {ci_mult * std_residual:.3f}"
+                    )
+                    fig_hist.add_vline(
+                        x=-ci_mult * std_residual, 
+                        line_dash="dot", 
+                        line_color="red",
+                        annotation_text=f"-{ci_mult:.1f}σ = {-ci_mult * std_residual:.3f}"
+                    )
+                    
+                    fig_hist.update_layout(
+                        title="Residuals Histogram (Kalman Filter vs Raw Data)",
+                        xaxis_title="Residual (Raw Weight - Kalman Weight) [lbs]",
+                        yaxis_title="Density",
+                        height=500,
+                        showlegend=True
+                    )
+                    
+                    st.plotly_chart(fig_hist, width='stretch')
+                    
+                    # Statistics summary
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Mean Residual", f"{mean_residual:.4f} lbs")
+                    
+                    with col2:
+                        st.metric("Std Deviation", f"{std_residual:.4f} lbs")
+                    
+                    with col3:
+                        # Calculate skewness and kurtosis
+                        skewness = stats.skew(residuals_array)
+                        excess_kurtosis = stats.kurtosis(residuals_array)
+                        st.metric("Skewness", f"{skewness:.4f}")
+                    
+                    # Normality test
+                    if len(residuals_array) >= 3:
+                        shapiro_stat, shapiro_p = stats.shapiro(residuals_array)
+                        ks_stat, ks_p = stats.kstest(residuals_array, 'norm', args=(mean_residual, std_residual))
+                        
+                        st.info(f"""
+                        **Normality Tests:**
+                        - Shapiro-Wilk: p = {shapiro_p:.4f} {'(Normal)' if shapiro_p > 0.05 else '(Not Normal)'}
+                        - Kolmogorov-Smirnov: p = {ks_p:.4f} {'(Normal)' if ks_p > 0.05 else '(Not Normal)'}
+                        
+                        *p > 0.05: Residuals appear normal | p ≤ 0.05: Residuals may not be normal*
+                        """)
+                else:
+                    st.warning("No residuals data available for analysis")
+                
+                # Forecast metrics (only if enabled)
                 if st.session_state.enable_forecast:
-                    st.subheader("🔮 Forecast")
+                    st.subheader("🔮 Forecast Summary")
+                    col1, col2 = st.columns(2)
                     
                     # Calculate forecasts
                     kf = WeightKalmanFilter(
@@ -789,83 +1006,7 @@ def show_weight_tracking():
                         [latest_kalman.weight_velocity_cov, latest_kalman.velocity_var],
                     ], dtype=float)
                     
-                    # Generate forecast data using configurable duration
-                    forecast_days = int(st.session_state.forecast_days)
-                    latest_date = ensure_py_datetime(kalman_dates[-1])
-                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(1, forecast_days + 1)]
-                    forecast_weights = []
-                    forecast_uncertainties = []
-                    
-                    for i in range(1, forecast_days + 1):
-                        weight, std = kf.forecast(float(i))
-                        forecast_weights.append(weight)
-                        forecast_uncertainties.append(std)
-                    
-                    # Create forecast plot
-                    forecast_fig = go.Figure()
-                    
-                    # Add historical data
-                    forecast_fig.add_trace(go.Scatter(
-                        x=dates,
-                        y=weights,
-                        mode='markers',
-                        name='Historical Data',
-                        marker=dict(size=6, color='blue', opacity=0.7)
-                    ))
-                    
-                    # Add Kalman estimate (use dense, smooth curve)
-                    forecast_fig.add_trace(go.Scatter(
-                        x=dense_datetimes,
-                        y=dense_means,
-                        mode='lines',
-                        name='Kalman Estimate',
-                        line=dict(color='red', width=2)
-                    ))
-                    
-                    # Add forecast
-                    forecast_fig.add_trace(go.Scatter(
-                        x=forecast_dates,
-                        y=forecast_weights,
-                        mode='lines',
-                        name='Forecast',
-                        line=dict(color='purple', width=2, dash='dash')
-                    ))
-                    
-                    # Add forecast confidence interval
-                    forecast_upper = [w + ci_multiplier * std for w, std in zip(forecast_weights, forecast_uncertainties)]
-                    forecast_lower = [w - ci_multiplier * std for w, std in zip(forecast_weights, forecast_uncertainties)]
-                    
-                    forecast_fig.add_trace(go.Scatter(
-                        x=forecast_dates,
-                        y=forecast_upper,
-                        mode='lines',
-                        line=dict(width=0),
-                        showlegend=False,
-                        hoverinfo='skip'
-                    ))
-                    
-                    forecast_fig.add_trace(go.Scatter(
-                        x=forecast_dates,
-                        y=forecast_lower,
-                        mode='lines',
-                    fill='tonexty',
-                    fillcolor='rgba(128,0,128,0.2)',
-                    line=dict(width=0),
-                    name=f'Forecast {st.session_state.confidence_interval} CI',
-                    hoverinfo='skip'
-                    ))
-                    
-                    forecast_fig.update_layout(
-                        title=f"{forecast_days}-Day Weight Forecast",
-                        xaxis_title="Date",
-                        yaxis_title="Weight (lbs)",
-                        height=400
-                    )
-                    
-                    st.plotly_chart(forecast_fig, width='stretch')
-                    
-                    # Forecast summary
-                    col1, col2 = st.columns(2)
+                    ci_mult = get_confidence_multiplier(st.session_state.confidence_interval)
                     
                     with col1:
                         week_forecast, week_std = kf.forecast(7.0)
@@ -1198,6 +1339,19 @@ def show_settings():
             st.rerun()
     
     with col2:
+        residuals_bins = st.slider(
+            "Residuals Histogram Bins",
+            min_value=5,
+            max_value=50,
+            value=st.session_state.residuals_bins,
+            help="Number of bins for the residuals histogram (more bins = more detail)"
+        )
+        
+        # Update session state immediately when changed
+        if residuals_bins != st.session_state.residuals_bins:
+            st.session_state.residuals_bins = residuals_bins
+            st.rerun()
+        
         st.info("**Note**: This app uses Kalman filtering as the primary analysis method, which automatically provides optimal smoothing and trend estimation.")
     
     if st.button("Save Settings", type="primary"):
