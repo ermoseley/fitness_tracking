@@ -674,7 +674,7 @@ Forecasts:
 1 month: {month_forecast:.2f} ± {ci_multiplier * month_std:.2f}"""
     
     # Add forecasting fan if enabled
-    if enable_forecast and not (start_date or end_date):  # Only show forecast when not filtering by date
+    if enable_forecast:  # Show forecast even when filtering by date
         # Create forecast dates (1 month = 30 days) - start from day 0 to eliminate gap
         forecast_days = 30
         last_date = dense_datetimes[-1]
@@ -725,7 +725,8 @@ Forecasts:
         span = right - left
         pad = max(span * 0.02, timedelta(days=1))
         left_pad = left if start_date else (left - pad)
-        right_pad = right if end_date else (right + pad)
+        # Always extend 30 days into the future, regardless of date filtering
+        right_pad = right + timedelta(days=30) if end_date else (right + timedelta(days=30))
         plt.xlim(left=left_pad, right=right_pad)
     
     # After setting x-limits, set Y-limits based on visible series (bands, mean, points)
@@ -738,6 +739,11 @@ Forecasts:
             y_values.extend([float(v) for v in dense_means])
         if raw_weights:
             y_values.extend([float(v) for v in raw_weights])
+        # Include forecast values in y-axis range calculation
+        if enable_forecast and 'forecast_weights' in locals():
+            y_values.extend([float(v) for v in forecast_weights])
+            y_values.extend([float(v) for v in forecast_upper])
+            y_values.extend([float(v) for v in forecast_lower])
         if y_values:
             y_min = float(np.nanmin(np.array(y_values, dtype=float)))
             y_max = float(np.nanmax(np.array(y_values, dtype=float)))
@@ -1067,7 +1073,7 @@ def create_bodyfat_plot_from_kalman(
         return bf_mid_val, halfwidth
 
     # Add forecasting fan if enabled
-    if enable_forecast and not (start_date or end_date):  # Only show forecast when not filtering by date
+    if enable_forecast:  # Show forecast even when filtering by date
         # Create forecast dates (1 month = 30 days) - start from day 0 to eliminate gap
         forecast_days = 30
         last_date = dense_datetimes[-1]
@@ -1136,7 +1142,8 @@ def create_bodyfat_plot_from_kalman(
         span = right - left
         pad = max(span * 0.02, timedelta(days=1))
         left_pad = left if start_date else (left - pad)
-        right_pad = right if end_date else (right + pad)
+        # Always extend 30 days into the future, regardless of date filtering
+        right_pad = right + timedelta(days=30) if end_date else (right + timedelta(days=30))
         plt.xlim(left=left_pad, right=right_pad)
     
     # After setting x-limits, compute Y-limits from visible series
@@ -1152,6 +1159,11 @@ def create_bodyfat_plot_from_kalman(
             y_values.extend([float(v) for v in bf_upper_bound])
         # Scatter points
         y_values.extend([float(v) for v in entry_bf_mid_plot])
+        # Include forecast values in y-axis range calculation
+        if enable_forecast and 'forecast_bf_mid' in locals():
+            y_values.extend([float(v) for v in forecast_bf_mid])
+            y_values.extend([float(v) for v in forecast_bf_upper])
+            y_values.extend([float(v) for v in forecast_bf_lower])
         if y_values:
             y_min = float(np.nanmin(np.array(y_values, dtype=float)))
             y_max = float(np.nanmax(np.array(y_values, dtype=float)))
@@ -1364,7 +1376,7 @@ def create_bmi_plot_from_kalman(
     plt.axhline(y=30.0, color="red", linestyle="--", alpha=0.7, label="Overweight (30.0)")
 
     # Add forecasting fan if enabled
-    if enable_forecast and not (start_date or end_date):  # Only show forecast when not filtering by date
+    if enable_forecast:  # Show forecast even when filtering by date
         # Get the last state for forecasting
         last_state = states[-1]
         last_date = dates[-1]
@@ -1427,7 +1439,8 @@ def create_bmi_plot_from_kalman(
         span = right - left
         pad = max(span * 0.02, timedelta(days=1))
         left_pad = left if start_date else (left - pad)
-        right_pad = right if end_date else (right + pad)
+        # Always extend 30 days into the future, regardless of date filtering
+        right_pad = right + timedelta(days=30) if end_date else (right + timedelta(days=30))
         plt.xlim(left=left_pad, right=right_pad)
     
     # After setting x-limits, compute Y-limits from visible series
@@ -1439,6 +1452,11 @@ def create_bmi_plot_from_kalman(
         y_values.extend([float(v) for v in bmi_means])
         # Scatter points
         y_values.extend([float(v) for v in entry_bmi_plot])
+        # Include forecast values in y-axis range calculation
+        if enable_forecast and 'forecast_bmi' in locals():
+            y_values.extend([float(v) for v in forecast_bmi])
+            y_values.extend([float(v) for v in forecast_upper])
+            y_values.extend([float(v) for v in forecast_lower])
         if y_values:
             y_min = float(np.nanmin(np.array(y_values, dtype=float)))
             y_max = float(np.nanmax(np.array(y_values, dtype=float)))
@@ -1630,7 +1648,7 @@ def create_ffmi_plot_from_kalman(
     plt.axhline(y=22.0, color="blue", linestyle="--", alpha=0.7, label="Excellent (22.0)")
 
     # Add forecasting fan if enabled
-    if enable_forecast and not (start_date or end_date):  # Only show forecast when not filtering by date
+    if enable_forecast:  # Show forecast even when filtering by date
         # Get the last state for forecasting
         last_state = states[-1]
         last_date = dates[-1]
@@ -1710,15 +1728,18 @@ def create_ffmi_plot_from_kalman(
             plt.xlim(left=min_datetime)
         if end_date:
             end_datetime = dt.combine(end_date, dt.max.time())
-            plt.xlim(right=end_datetime)
+            # Always extend 30 days into the future, regardless of date filtering
+            plt.xlim(right=end_datetime + timedelta(days=30))
         elif max_datetime is not None:
-            plt.xlim(right=max_datetime)
+            # Always extend 30 days into the future, regardless of date filtering
+            plt.xlim(right=max_datetime + timedelta(days=30))
     else:
         # Default to full data range when no explicit start/end dates are provided
         if dates:
             min_datetime = min(dates)
             max_datetime = max(dates)
-            plt.xlim(left=min_datetime, right=max_datetime)
+            # Always extend 30 days into the future, regardless of date filtering
+            plt.xlim(left=min_datetime, right=max_datetime + timedelta(days=30))
     
     # After setting x-limits, compute Y-limits from visible series
     try:
@@ -1729,6 +1750,11 @@ def create_ffmi_plot_from_kalman(
         y_values.extend([float(v) for v in ffmi_means])
         # Scatter points
         y_values.extend([float(v) for v in entry_ffmi_plot])
+        # Include forecast values in y-axis range calculation
+        if enable_forecast and 'forecast_ffmi' in locals():
+            y_values.extend([float(v) for v in forecast_ffmi])
+            y_values.extend([float(v) for v in forecast_upper])
+            y_values.extend([float(v) for v in forecast_lower])
         if y_values:
             y_min = float(np.nanmin(np.array(y_values, dtype=float)))
             y_max = float(np.nanmax(np.array(y_values, dtype=float)))
