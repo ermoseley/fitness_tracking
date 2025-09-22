@@ -2026,7 +2026,7 @@ def show_user_guide():
     - **Forecast Accuracy**: How reliable future predictions are
     
     ### Chart Interpretation
-    - **Blue Line**: Raw data points
+    - **Blue Dots**: Raw data points
     - **Red Line**: Smoothed trend (Kalman filter output)
     - **Shaded Area**: Confidence interval around trend
     - **Dashed Line**: Future forecast projection
