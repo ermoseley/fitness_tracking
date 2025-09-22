@@ -1240,7 +1240,7 @@ def show_data_management():
     # File upload section
     st.subheader("📤 Upload Data Files")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.write("**Weights CSV**")
@@ -1340,6 +1340,69 @@ def show_data_management():
             except Exception as e:
                 st.error(f"Error processing file: {e}")
                 st.info("Please ensure your CSV has 'date' and 'lbm' columns, or at least 2 columns with date in first column and LBM values in second column.")
+    
+    with col3:
+        st.write("**FITINDEX CSV**")
+        fitindex_file = st.file_uploader(
+            "Upload FITINDEX CSV",
+            type=['csv'],
+            help="FITINDEX app export CSV file"
+        )
+        
+        if fitindex_file is not None:
+            try:
+                df = pd.read_csv(fitindex_file)
+                
+                # Check if this looks like a FITINDEX file
+                if 'Time of Measurement' in df.columns and 'Weight(lb)' in df.columns:
+                    st.success("FITINDEX file detected! Converting to standard format...")
+                    
+                    # Convert FITINDEX data to our standard format
+                    converted_entries = []
+                    
+                    for _, row in df.iterrows():
+                        try:
+                            # Parse the datetime from FITINDEX format
+                            time_str = str(row['Time of Measurement']).strip()
+                            weight = float(row['Weight(lb)'])
+                            
+                            # Parse the datetime (format: "MM/DD/YYYY, HH:MM:SS")
+                            dt = datetime.strptime(time_str, "%m/%d/%Y, %H:%M:%S")
+                            
+                            # Create WeightEntry
+                            entry = WeightEntry(dt, weight)
+                            converted_entries.append(entry)
+                            
+                        except (ValueError, TypeError) as e:
+                            # Skip invalid entries
+                            continue
+                    
+                    if converted_entries:
+                        # Sort entries by datetime
+                        converted_entries.sort(key=lambda x: x.entry_datetime)
+                        
+                        # Save to weights.csv
+                        data_dir = "data"
+                        os.makedirs(data_dir, exist_ok=True)
+                        weights_path = os.path.join(data_dir, "weights.csv")
+                        
+                        # Write all entries to CSV
+                        with open(weights_path, 'w', newline='') as f:
+                            f.write("date,weight\n")
+                            for entry in converted_entries:
+                                f.write(f"{entry.entry_datetime.isoformat()},{entry.weight}\n")
+                        
+                        # Reload data
+                        load_data_files()
+                        st.success(f"Successfully converted and uploaded {len(converted_entries)} weight entries from FITINDEX data")
+                        st.info("FITINDEX data has been converted to the standard weights format and is now your primary data source.")
+                        st.rerun()
+                    else:
+                        st.error("No valid weight entries found in the FITINDEX file")
+                else:
+                    st.error("This doesn't appear to be a FITINDEX CSV file. Expected columns: 'Time of Measurement' and 'Weight(lb)'")
+            except Exception as e:
+                st.error(f"Error processing FITINDEX file: {e}")
     
     # Data summary
     st.subheader("📊 Data Summary")
