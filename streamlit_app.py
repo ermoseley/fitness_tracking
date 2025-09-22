@@ -347,11 +347,11 @@ def show_dashboard():
                 # Generate forecast data using configurable duration
                 forecast_days = int(st.session_state.forecast_days)
                 latest_date = ensure_py_datetime(dense_datetimes[-1])
-                forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(1, forecast_days + 1)]
+                forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(0, forecast_days)]
                 forecast_weights = []
                 forecast_uncertainties = []
                 
-                for i in range(1, forecast_days + 1):
+                for i in range(0, forecast_days):
                     weight, std = kf.forecast(float(i))
                     forecast_weights.append(weight)
                     forecast_uncertainties.append(std)
@@ -767,11 +767,11 @@ def show_weight_tracking():
                     # Generate forecast data using configurable duration
                     forecast_days = int(st.session_state.forecast_days)
                     latest_date = ensure_py_datetime(dense_datetimes[-1])
-                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(1, forecast_days + 1)]
+                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(0, forecast_days)]
                     forecast_weights = []
                     forecast_uncertainties = []
                     
-                    for i in range(1, forecast_days + 1):
+                    for i in range(0, forecast_days):
                         weight, std = kf.forecast(float(i))
                         forecast_weights.append(weight)
                         forecast_uncertainties.append(std)
