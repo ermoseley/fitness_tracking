@@ -4,6 +4,12 @@ A modern web-based fitness tracking application built with Streamlit, featuring 
 
 ## Features
 
+### 🔐 Authentication
+- **User Registration & Login**: Create accounts with username and password
+- **Secure Password Storage**: Passwords are hashed using PBKDF2
+- **Session Management**: 24-hour session timeout for security
+- **Data Isolation**: Each user's data is completely separate
+
 ### 🏠 Dashboard
 - Overview of current weight and trends
 - Key metrics including 7-day EMA and trend rates
@@ -61,11 +67,20 @@ Should contain columns:
 
 ## Usage
 
-1. **First Time Setup**: Upload your weight data CSV file in the Data Management page
-2. **Add Entries**: Use the Weight Tracking page to add new weight entries
-3. **View Analysis**: Check the Dashboard for overview metrics and trends
-4. **Body Composition**: Set your height and upload LBM data for body fat analysis
-5. **Customize**: Adjust settings in the Settings page for different analysis parameters
+1. **First Time Setup**: 
+   - Register a new account with a username and password
+   - Upload your weight data CSV file in the Data Management page
+2. **Daily Use**: 
+   - Login with your credentials
+   - Add new weight entries using the Add Entries page
+   - View your progress on the Dashboard
+3. **Analysis**: 
+   - Check the Weight Analysis page for detailed trends
+   - Set your height and upload LBM data for body fat analysis
+   - Customize settings in the Settings page
+4. **Data Management**: 
+   - Export your data as CSV files
+   - Upload new data files to replace existing data
 
 ## Technical Details
 

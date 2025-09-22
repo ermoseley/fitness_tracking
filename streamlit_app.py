@@ -32,6 +32,7 @@ from storage import (
     get_lbm_df_for_user, insert_lbm_for_user, replace_lbm_for_user,
     get_height_for_user, set_height_for_user
 )
+from auth import init_auth_tables, require_auth, get_current_user, logout
 from kalman import (
     WeightKalmanFilter, KalmanState, run_kalman_filter, 
     run_kalman_smoother, create_kalman_plot, create_bodyfat_plot_from_kalman,
@@ -163,8 +164,14 @@ if 'residuals_bins' not in st.session_state:
 
 def load_data_files():
     """Load data for current user from the SQLite database"""
-    # Ensure we have a sanitized user id in session
-    user_id = sanitize_user_id(st.session_state.get("user_id", f"guest-{uuid.uuid4().hex[:8]}"))
+    # Get the authenticated user ID
+    user_id = get_current_user()
+    if not user_id:
+        st.error("No authenticated user found")
+        return
+    
+    # Sanitize the user ID for database storage
+    user_id = sanitize_user_id(user_id)
     st.session_state.user_id = user_id
 
     # One-time migration: if DB is empty but legacy per-user CSV files exist, import them
@@ -249,13 +256,25 @@ def load_data_files():
 
 def save_height(height_inches: float):
     """Save height to database for current user"""
-    user_id = sanitize_user_id(st.session_state.user_id)
+    user_id = get_current_user()
+    if not user_id:
+        st.error("No authenticated user found")
+        return
+    
+    user_id = sanitize_user_id(user_id)
     set_height_for_user(user_id, float(height_inches))
     st.session_state.height = float(height_inches)
 
 def main():
-    # Initialize database and load data on startup
+    # Initialize database and authentication on startup
     init_database()
+    init_auth_tables()
+    
+    # Check authentication - if not authenticated, show login form and return
+    if not require_auth():
+        return
+    
+    # Load data for authenticated user
     load_data_files()
     
     # Add custom CSS to reduce spacing between metrics and captions
@@ -273,14 +292,17 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        # User profile / selection
+        # User profile / logout
         st.header("👤 User Profile")
-        current_user = st.text_input("User ID", value=st.session_state.user_id, help="Choose a unique ID to store your data separately")
-        if current_user and sanitize_user_id(current_user) != sanitize_user_id(st.session_state.user_id):
-            st.session_state.user_id = sanitize_user_id(current_user)
-            # Reload files for the new user
-            load_data_files()
-            st.rerun()
+        current_user = get_current_user()
+        if current_user:
+            st.success(f"Logged in as: **{current_user}**")
+            if st.button("🚪 Logout", type="secondary"):
+                logout()
+                return
+        else:
+            st.error("Not authenticated")
+            return
 
         st.header("📊 Navigation")
         page = st.selectbox(
@@ -604,7 +626,9 @@ def show_add_entries():
             if st.button("Add Weight Entry", type="primary", key="add_weight"):
                 if weight_value > 0:
                     # Save to DB (per-user)
-                    insert_weight_for_user(sanitize_user_id(st.session_state.user_id), entry_datetime, float(weight_value))
+                    user_id = get_current_user()
+                    if user_id:
+                        insert_weight_for_user(sanitize_user_id(user_id), entry_datetime, float(weight_value))
                     
                     # Reload data
                     load_data_files()
@@ -629,7 +653,9 @@ def show_add_entries():
             if st.button("Add LBM Entry", type="primary", key="add_lbm"):
                 if lbm_value > 0:
                     # Save to DB (per-user)
-                    insert_lbm_for_user(sanitize_user_id(st.session_state.user_id), lbm_datetime, float(lbm_value))
+                    user_id = get_current_user()
+                    if user_id:
+                        insert_lbm_for_user(sanitize_user_id(user_id), lbm_datetime, float(lbm_value))
                     
                     # Reload data
                     load_data_files()
@@ -665,7 +691,9 @@ def show_add_entries():
                                 lbm = current_weight * (1.0 - bf_value / 100.0)
                                 
                                 # Save to DB (per-user)
-                                insert_lbm_for_user(sanitize_user_id(st.session_state.user_id), bf_datetime, float(lbm))
+                                user_id = get_current_user()
+                                if user_id:
+                                    insert_lbm_for_user(sanitize_user_id(user_id), bf_datetime, float(lbm))
                                 
                                 # Reload data
                                 load_data_files()
@@ -1473,7 +1501,9 @@ def show_data_management():
                 df = pd.read_csv(weights_file)
                 if 'date' in df.columns and 'weight' in df.columns:
                     # Replace user's weights in DB
-                    replace_weights_for_user(sanitize_user_id(st.session_state.user_id), df)
+                    user_id = get_current_user()
+                    if user_id:
+                        replace_weights_for_user(sanitize_user_id(user_id), df)
                     
                     # Reload data
                     load_data_files()
@@ -1508,7 +1538,9 @@ def show_data_management():
                         return
                     
                     # Replace user's LBM data in DB
-                    replace_lbm_for_user(sanitize_user_id(st.session_state.user_id), df)
+                    user_id = get_current_user()
+                    if user_id:
+                        replace_lbm_for_user(sanitize_user_id(user_id), df)
                     
                     # Reload data
                     load_data_files()
@@ -1534,7 +1566,9 @@ def show_data_management():
                             
                             if len(df_fixed) > 0:
                                 # Replace user's LBM data in DB (auto-fixed format)
-                                replace_lbm_for_user(sanitize_user_id(st.session_state.user_id), df_fixed)
+                                user_id = get_current_user()
+                                if user_id:
+                                    replace_lbm_for_user(sanitize_user_id(user_id), df_fixed)
                                 
                                 # Reload data
                                 load_data_files()
@@ -1591,11 +1625,13 @@ def show_data_management():
                         converted_entries.sort(key=lambda x: x.entry_datetime)
                         
                         # Replace user's weights in DB
-                        conv_df = pd.DataFrame({
-                            'date': [e.entry_datetime for e in converted_entries],
-                            'weight': [e.weight for e in converted_entries]
-                        })
-                        replace_weights_for_user(sanitize_user_id(st.session_state.user_id), conv_df)
+                        user_id = get_current_user()
+                        if user_id:
+                            conv_df = pd.DataFrame({
+                                'date': [e.entry_datetime for e in converted_entries],
+                                'weight': [e.weight for e in converted_entries]
+                            })
+                            replace_weights_for_user(sanitize_user_id(user_id), conv_df)
                         
                         # Reload data
                         load_data_files()
