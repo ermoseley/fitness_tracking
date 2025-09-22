@@ -15,6 +15,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import io
+import re
+import uuid
 
 # Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -56,6 +58,53 @@ def ensure_py_datetime(dt: object) -> datetime:
         return dt.to_pydatetime()
     return dt  # assume already datetime
 
+# ---------------------------
+# Per-user data utilities
+# ---------------------------
+
+def sanitize_user_id(user_id: str) -> str:
+    """Sanitize a user identifier to be filesystem-safe."""
+    if not isinstance(user_id, str):
+        user_id = str(user_id)
+    # Allow letters, numbers, dash, underscore; replace others with dash
+    cleaned = re.sub(r"[^A-Za-z0-9_\-]", "-", user_id.strip())
+    # Collapse multiple dashes
+    cleaned = re.sub(r"-+", "-", cleaned)
+    return cleaned or f"guest-{uuid.uuid4().hex[:8]}"
+
+def get_user_data_dir() -> str:
+    """Return the data directory path for the current user."""
+    user_id = st.session_state.get("user_id")
+    if not user_id:
+        user_id = f"guest-{uuid.uuid4().hex[:8]}"
+        st.session_state.user_id = user_id
+    safe_user = sanitize_user_id(user_id)
+    return os.path.join("data", "users", safe_user)
+
+def ensure_user_files_exist() -> None:
+    """Ensure the current user's data directory and files exist with correct headers."""
+    data_dir = get_user_data_dir()
+    os.makedirs(data_dir, exist_ok=True)
+    weights_path = os.path.join(data_dir, "weights.csv")
+    lbm_path = os.path.join(data_dir, "lbm.csv")
+    height_path = os.path.join(data_dir, "height.txt")
+
+    # Create blank CSVs with headers if missing
+    if not os.path.exists(weights_path):
+        with open(weights_path, "w", newline="") as f:
+            f.write("date,weight\n")
+    if not os.path.exists(lbm_path):
+        with open(lbm_path, "w", newline="") as f:
+            f.write("date,lbm\n")
+    # Initialize height if missing
+    if not os.path.exists(height_path):
+        try:
+            default_height = float(st.session_state.get("height", 67.0))
+        except Exception:
+            default_height = 67.0
+        with open(height_path, "w") as f:
+            f.write(f"{default_height:.3f}")
+
 # Page configuration
 st.set_page_config(
     page_title="",
@@ -89,6 +138,8 @@ st.markdown("""
 # Initialize session state
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = f"guest-{uuid.uuid4().hex[:8]}"
 if 'weights_data' not in st.session_state:
     st.session_state.weights_data = []
 if 'lbm_data' not in st.session_state:
@@ -107,7 +158,9 @@ if 'residuals_bins' not in st.session_state:
 
 def load_data_files():
     """Load data from CSV files"""
-    data_dir = "data"
+    # Ensure per-user files exist before loading
+    ensure_user_files_exist()
+    data_dir = get_user_data_dir()
     weights_path = os.path.join(data_dir, "weights.csv")
     lbm_path = os.path.join(data_dir, "lbm.csv")
     height_path = os.path.join(data_dir, "height.txt")
@@ -142,7 +195,7 @@ def load_data_files():
 
 def save_height(height_inches: float):
     """Save height to file"""
-    data_dir = "data"
+    data_dir = get_user_data_dir()
     os.makedirs(data_dir, exist_ok=True)
     height_path = os.path.join(data_dir, "height.txt")
     with open(height_path, 'w') as f:
@@ -168,6 +221,15 @@ def main():
     
     # Sidebar
     with st.sidebar:
+        # User profile / selection
+        st.header("👤 User Profile")
+        current_user = st.text_input("User ID", value=st.session_state.user_id, help="Choose a unique ID to store your data separately")
+        if current_user and sanitize_user_id(current_user) != sanitize_user_id(st.session_state.user_id):
+            st.session_state.user_id = sanitize_user_id(current_user)
+            # Reload files for the new user
+            load_data_files()
+            st.rerun()
+
         st.header("📊 Navigation")
         page = st.selectbox(
             "Choose a page:",
@@ -492,8 +554,8 @@ def show_add_entries():
                     # Create weight entry
                     entry = WeightEntry(entry_datetime, weight_value)
                     
-                    # Save to CSV
-                    data_dir = "data"
+                    # Save to CSV (per-user directory)
+                    data_dir = get_user_data_dir()
                     os.makedirs(data_dir, exist_ok=True)
                     weights_path = os.path.join(data_dir, "weights.csv")
                     append_entry(weights_path, entry)
@@ -520,8 +582,8 @@ def show_add_entries():
             
             if st.button("Add LBM Entry", type="primary", key="add_lbm"):
                 if lbm_value > 0:
-                    # Save to LBM CSV
-                    data_dir = "data"
+                    # Save to LBM CSV (per-user directory)
+                    data_dir = get_user_data_dir()
                     os.makedirs(data_dir, exist_ok=True)
                     lbm_path = os.path.join(data_dir, "lbm.csv")
                     
@@ -567,8 +629,8 @@ def show_add_entries():
                                 # Calculate LBM: LBM = weight * (1 - body_fat_percent/100)
                                 lbm = current_weight * (1.0 - bf_value / 100.0)
                                 
-                                # Save to LBM CSV
-                                data_dir = "data"
+                                # Save to LBM CSV (per-user directory)
+                                data_dir = get_user_data_dir()
                                 os.makedirs(data_dir, exist_ok=True)
                                 lbm_path = os.path.join(data_dir, "lbm.csv")
                                 
@@ -1331,7 +1393,6 @@ def show_settings():
             st.session_state.residuals_bins = residuals_bins
             st.rerun()
         
-        st.info("**Note**: This app uses Kalman filtering as the primary analysis method, which automatically provides optimal smoothing and trend estimation.")
     
     if st.button("Save Settings", type="primary"):
         # Settings are already saved automatically when changed
@@ -1388,7 +1449,7 @@ def show_data_management():
                 df = pd.read_csv(weights_file)
                 if 'date' in df.columns and 'weight' in df.columns:
                     # Save to data directory
-                    data_dir = "data"
+                    data_dir = get_user_data_dir()
                     os.makedirs(data_dir, exist_ok=True)
                     weights_path = os.path.join(data_dir, "weights.csv")
                     df.to_csv(weights_path, index=False)
@@ -1425,8 +1486,8 @@ def show_data_management():
                         st.error(f"Error converting data types: {e}")
                         return
                     
-                    # Save to data directory
-                    data_dir = "data"
+                    # Save to data directory (per-user)
+                    data_dir = get_user_data_dir()
                     os.makedirs(data_dir, exist_ok=True)
                     lbm_path = os.path.join(data_dir, "lbm.csv")
                     df.to_csv(lbm_path, index=False)
@@ -1454,8 +1515,8 @@ def show_data_management():
                             df_fixed = df_fixed.dropna()
                             
                             if len(df_fixed) > 0:
-                                # Save the fixed file
-                                data_dir = "data"
+                                # Save the fixed file (per-user)
+                                data_dir = get_user_data_dir()
                                 os.makedirs(data_dir, exist_ok=True)
                                 lbm_path = os.path.join(data_dir, "lbm.csv")
                                 df_fixed.to_csv(lbm_path, index=False)
@@ -1514,8 +1575,8 @@ def show_data_management():
                         # Sort entries by datetime
                         converted_entries.sort(key=lambda x: x.entry_datetime)
                         
-                        # Save to weights.csv
-                        data_dir = "data"
+                        # Save to weights.csv (per-user)
+                        data_dir = get_user_data_dir()
                         os.makedirs(data_dir, exist_ok=True)
                         weights_path = os.path.join(data_dir, "weights.csv")
                         
