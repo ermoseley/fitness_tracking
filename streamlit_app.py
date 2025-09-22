@@ -1088,19 +1088,19 @@ def show_weight_tracking():
                         annotation_text=f"-1σ = {-std_residual:.3f}"
                     )
                     
-                    # Confidence interval lines
-                    fig_hist.add_vline(
-                        x=ci_mult * std_residual, 
-                        line_dash="dot", 
-                        line_color="red",
-                        annotation_text=f"+{ci_mult:.1f}σ = {ci_mult * std_residual:.3f}"
-                    )
-                    fig_hist.add_vline(
-                        x=-ci_mult * std_residual, 
-                        line_dash="dot", 
-                        line_color="red",
-                        annotation_text=f"-{ci_mult:.1f}σ = {-ci_mult * std_residual:.3f}"
-                    )
+                    # # Confidence interval lines
+                    # fig_hist.add_vline(
+                    #     x=ci_mult * std_residual, 
+                    #     line_dash="dot", 
+                    #     line_color="red",
+                    #     annotation_text=f"+{ci_mult:.1f}σ = {ci_mult * std_residual:.3f}"
+                    # )
+                    # fig_hist.add_vline(
+                    #     x=-ci_mult * std_residual, 
+                    #     line_dash="dot", 
+                    #     line_color="red",
+                    #     annotation_text=f"-{ci_mult:.1f}σ = {-ci_mult * std_residual:.3f}"
+                    # )
                     
                     fig_hist.update_layout(
                         title="Residuals Histogram (Kalman Filter vs Raw Data)",

@@ -12,8 +12,10 @@ import os
 
 # Optional: cache connection in Streamlit environments
 try:
-    import streamlit as _st  # type: ignore
+    import streamlit as st  # type: ignore
+    _st = st  # alias used elsewhere in this module
 except Exception:  # pragma: no cover - not running in streamlit
+    st = None  # type: ignore
     _st = None  # type: ignore
 
 def get_db_path() -> str:
