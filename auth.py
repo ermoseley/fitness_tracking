@@ -219,7 +219,7 @@ def show_auth_form():
     if _st is None:
         return
     
-    st.title("🔐 Fitness Tracker Login")
+    st.title("🔐 BodyMetrics Login")
     
     tab1, tab2 = st.tabs(["Login", "Register"])
     
