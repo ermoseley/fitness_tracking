@@ -1512,17 +1512,24 @@ def show_body_composition():
                 
                 # Interpolate LBM to dense Kalman dates
                 from scipy.interpolate import interp1d
+                
+                # Convert LBM dates to seconds from first date
+                lbm_times = (lbm_dates - lbm_dates[0]).dt.total_seconds().values
+                
+                # Create interpolation function that holds last value constant beyond data range
                 lbm_interp = interp1d(
-                    (lbm_dates - lbm_dates[0]).dt.total_seconds(),
+                    lbm_times,
                     lbm_values,
                     kind='linear',
                     bounds_error=False,
-                    fill_value='extrapolate'
+                    fill_value=(lbm_values[0], lbm_values[-1])  # Hold first/last values constant
                 )
                 
                 # Calculate body fat percentages for dense Kalman data
                 bf_percentages = []
                 lbm_interpolated = []
+                last_lbm_date = lbm_dates.iloc[-1]
+                
                 for i, (dt, weight) in enumerate(zip(dense_datetimes, dense_means)):
                     time_diff = (dt - dense_datetimes[0]).total_seconds()
                     lbm = lbm_interp(time_diff)
@@ -1536,6 +1543,10 @@ def show_body_composition():
                     current_lbm = lbm_interpolated[-1]
                     bf_category = get_bf_category(current_bf, 'male')  # Assuming male for now
                     
+                    # Check if current LBM is being held constant (beyond last measurement)
+                    current_date = dense_datetimes[-1]
+                    is_lbm_held_constant = current_date > last_lbm_date
+                    
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
@@ -1546,6 +1557,10 @@ def show_body_composition():
                     
                     with col3:
                         st.metric("Current LBM", f"{current_lbm:.1f} lbs")
+                    
+                    # Show note if LBM is being held constant
+                    if is_lbm_held_constant:
+                        st.info(f"💡 **LBM Note**: Your last LBM measurement was on {last_lbm_date.strftime('%Y-%m-%d')}. Current LBM estimate assumes your lean mass has remained constant since then.")
                     
                     # Body fat trend chart with Kalman smoothing (lines only)
                     fig = go.Figure()
