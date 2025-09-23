@@ -67,6 +67,40 @@ def get_mobile_friendly_layout_config():
     )
 
 
+def get_velocity_mobile_layout_config():
+    """
+    Returns layout configuration for velocity plots with slightly lower legend positioning.
+    """
+    return dict(
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.20,  # Lower than default for velocity plots
+            xanchor="center",
+            x=0.5,
+            font=dict(size=10)
+        ),
+        margin=dict(b=90)  # Extra bottom margin for velocity plots
+    )
+
+
+def get_residuals_mobile_layout_config():
+    """
+    Returns layout configuration for residuals plots with extra space for legend.
+    """
+    return dict(
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.15,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=10)
+        ),
+        margin=dict(b=100)  # Extra bottom margin for residuals plots with legend
+    )
+
+
 def is_mobile_device():
     """
     Simple mobile detection based on Streamlit's user agent.
@@ -1114,15 +1148,7 @@ def show_weight_tracking():
                     height=400,
                     hovermode='x unified',
                     yaxis=dict(range=[-3, 3]),  # Set y-range to -3 to +3 lbs/week
-                    legend=dict(
-                        orientation="h",
-                        yanchor="top",
-                        y=-0.15,
-                        xanchor="center",
-                        x=0.5,
-                        font=dict(size=10)
-                    ),
-                    margin=dict(b=80)  # Add bottom margin for legend
+                    **get_velocity_mobile_layout_config()
                 )
                 
                 velocity_fig.update_xaxes(title_text="Date")
@@ -1178,41 +1204,56 @@ def show_weight_tracking():
                     # Add vertical lines for statistics
                     ci_mult = get_confidence_multiplier(st.session_state.confidence_interval)
                     
-                    # Mean line
+                    # Mean line (no annotation for mobile-friendly display)
                     fig_hist.add_vline(
                         x=mean_residual, 
                         line_dash="dash", 
-                        line_color="green",
-                        annotation_text=f"Mean = {mean_residual:.3f}"
+                        line_color="green"
                     )
                     
-                    # Standard deviation lines
-                    # fig_hist.add_vline(
-                    #     x=std_residual, 
-                    #     line_dash="dot", 
-                    #     line_color="orange",
-                    #     annotation_text=f"+1σ = {std_residual:.3f}"
-                    # )
-                    # fig_hist.add_vline(
-                    #     x=-std_residual, 
-                    #     line_dash="dot", 
-                    #     line_color="orange",
-                    #     annotation_text=f"-1σ = {-std_residual:.3f}"
-                    # )
-                    
-                    # # Confidence interval lines
+                    # Confidence interval lines (no annotations for mobile-friendly display)
                     fig_hist.add_vline(
                         x=ci_mult * std_residual, 
                         line_dash="dot", 
-                        line_color="red",
-                        annotation_text=f"+{ci_mult:.1f}σ = {ci_mult * std_residual:.3f}"
+                        line_color="red"
                     )
                     fig_hist.add_vline(
                         x=-ci_mult * std_residual, 
                         line_dash="dot", 
-                        line_color="red",
-                        annotation_text=f"-{ci_mult:.1f}σ = {-ci_mult * std_residual:.3f}"
+                        line_color="red"
                     )
+                    
+                    # Add invisible traces for legend entries (mobile-friendly)
+                    y_max = max(normal_dist) * 1.1
+                    fig_hist.add_trace(go.Scatter(
+                        x=[mean_residual, mean_residual],
+                        y=[0, y_max],
+                        mode='lines',
+                        line=dict(color='green', dash='dash'),
+                        name=f"Mean = {mean_residual:.3f}",
+                        showlegend=True,
+                        hoverinfo='skip'
+                    ))
+                    
+                    fig_hist.add_trace(go.Scatter(
+                        x=[ci_mult * std_residual, ci_mult * std_residual],
+                        y=[0, y_max],
+                        mode='lines',
+                        line=dict(color='red', dash='dot'),
+                        name=f"+{ci_mult:.1f}σ = {ci_mult * std_residual:.3f}",
+                        showlegend=True,
+                        hoverinfo='skip'
+                    ))
+                    
+                    fig_hist.add_trace(go.Scatter(
+                        x=[-ci_mult * std_residual, -ci_mult * std_residual],
+                        y=[0, y_max],
+                        mode='lines',
+                        line=dict(color='red', dash='dot'),
+                        name=f"-{ci_mult:.1f}σ = {-ci_mult * std_residual:.3f}",
+                        showlegend=True,
+                        hoverinfo='skip'
+                    ))
                     
                     fig_hist.update_layout(
                         title="Residuals Histogram (Kalman Filter vs Raw Data)",
@@ -1220,15 +1261,7 @@ def show_weight_tracking():
                         yaxis_title="Density",
                         height=500,
                         showlegend=True,
-                        legend=dict(
-                            orientation="h",
-                            yanchor="top",
-                            y=-0.15,
-                            xanchor="center",
-                            x=0.5,
-                            font=dict(size=10)
-                        ),
-                        margin=dict(b=80)  # Add bottom margin for legend
+                        **get_residuals_mobile_layout_config()
                     )
                     
                     st.plotly_chart(fig_hist, width='stretch')
