@@ -10,6 +10,19 @@ import sqlite3
 from typing import Optional, Tuple
 import os
 
+# Reuse storage's database selection (SQLite vs Postgres via SQLAlchemy)
+try:
+    # These imports are lightweight when SQLite; SQLAlchemy engine is created in storage
+    from storage import _USE_SQLALCHEMY as _AUTH_USE_SQLALCHEMY  # type: ignore
+    from storage import get_engine, get_db_path  # type: ignore
+except Exception:
+    _AUTH_USE_SQLALCHEMY = False  # fallback to SQLite-only auth
+    def get_db_path() -> str:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(base_dir, "data")
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, "fitness_tracker.db")
+
 # Optional: cache connection in Streamlit environments
 try:
     import streamlit as st  # type: ignore
@@ -18,12 +31,8 @@ except Exception:  # pragma: no cover - not running in streamlit
     st = None  # type: ignore
     _st = None  # type: ignore
 
-def get_db_path() -> str:
-    """Get the database path (same as storage.py)"""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(base_dir, "data")
-    os.makedirs(data_dir, exist_ok=True)
-    return os.path.join(data_dir, "fitness_tracker.db")
+def _get_sqlite_conn():
+    return sqlite3.connect(get_db_path())
 
 def _hash_password(password: str, salt: str = None) -> Tuple[str, str]:
     """Hash a password with a salt. Returns (hashed_password, salt)"""
@@ -40,151 +49,227 @@ def _verify_password(password: str, hashed_password: str, salt: str) -> bool:
     return test_hash == hashed_password
 
 def init_auth_tables():
-    """Initialize authentication tables in the database"""
-    conn = sqlite3.connect(get_db_path())
-    cursor = conn.cursor()
-    
-    # Create users table for authentication
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS auth_users (
-            user_id TEXT PRIMARY KEY,
-            password_hash TEXT NOT NULL,
-            salt TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP
-        )
-    """)
-    
-    # Create sessions table for tracking active sessions
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS auth_sessions (
-            session_id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at TIMESTAMP NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES auth_users (user_id)
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
+    """Initialize authentication tables in the database (SQLite or Postgres)."""
+    if _AUTH_USE_SQLALCHEMY:
+        from sqlalchemy import text
+        eng = get_engine()
+        assert eng is not None
+        with eng.begin() as conn:
+            conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS auth_users (
+                    user_id TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    salt TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_login TIMESTAMP
+                );
+                """
+            ))
+            conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS auth_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL
+                );
+                """
+            ))
+    else:
+        conn = _get_sqlite_conn()
+        cursor = conn.cursor()
+        # Create users table for authentication
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auth_users (
+                user_id TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP
+            )
+        """)
+        # Create sessions table for tracking active sessions
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES auth_users (user_id)
+            )
+        """)
+        conn.commit()
+        conn.close()
 
 def register_user(user_id: str, password: str) -> bool:
     """Register a new user with a password. Returns True if successful."""
     try:
-        conn = sqlite3.connect(get_db_path())
-        cursor = conn.cursor()
-        
-        # Check if user already exists
-        cursor.execute("SELECT user_id FROM auth_users WHERE user_id = ?", (user_id,))
-        if cursor.fetchone():
+        if _AUTH_USE_SQLALCHEMY:
+            from sqlalchemy import text
+            eng = get_engine()
+            assert eng is not None
+            with eng.begin() as conn:
+                row = conn.execute(text("SELECT user_id FROM auth_users WHERE user_id = :u"), {"u": user_id}).fetchone()
+                if row:
+                    return False
+                password_hash, salt = _hash_password(password)
+                conn.execute(text("""
+                    INSERT INTO auth_users (user_id, password_hash, salt)
+                    VALUES (:u, :p, :s)
+                """), {"u": user_id, "p": password_hash, "s": salt})
+            return True
+        else:
+            conn = _get_sqlite_conn()
+            cursor = conn.cursor()
+            # Check if user already exists
+            cursor.execute("SELECT user_id FROM auth_users WHERE user_id = ?", (user_id,))
+            if cursor.fetchone():
+                conn.close()
+                return False
+            # Hash the password
+            password_hash, salt = _hash_password(password)
+            # Insert new user
+            cursor.execute("""
+                INSERT INTO auth_users (user_id, password_hash, salt) 
+                VALUES (?, ?, ?)
+            """, (user_id, password_hash, salt))
+            conn.commit()
             conn.close()
-            return False
-        
-        # Hash the password
-        password_hash, salt = _hash_password(password)
-        
-        # Insert new user
-        cursor.execute("""
-            INSERT INTO auth_users (user_id, password_hash, salt) 
-            VALUES (?, ?, ?)
-        """, (user_id, password_hash, salt))
-        
-        conn.commit()
-        conn.close()
-        return True
+            return True
     except Exception:
         return False
 
 def authenticate_user(user_id: str, password: str) -> bool:
     """Authenticate a user with their password. Returns True if successful."""
     try:
-        conn = sqlite3.connect(get_db_path())
-        cursor = conn.cursor()
-        
-        # Get user's password hash and salt
-        cursor.execute("""
-            SELECT password_hash, salt FROM auth_users WHERE user_id = ?
-        """, (user_id,))
-        
-        result = cursor.fetchone()
-        if not result:
-            conn.close()
-            return False
-        
-        password_hash, salt = result
-        
-        # Verify password
-        is_valid = _verify_password(password, password_hash, salt)
-        
-        if is_valid:
-            # Update last login
+        if _AUTH_USE_SQLALCHEMY:
+            from sqlalchemy import text
+            eng = get_engine()
+            assert eng is not None
+            with eng.begin() as conn:
+                result = conn.execute(text(
+                    "SELECT password_hash, salt FROM auth_users WHERE user_id = :u"
+                ), {"u": user_id}).fetchone()
+                if not result:
+                    return False
+                password_hash, salt = result
+                is_valid = _verify_password(password, password_hash, salt)
+                if is_valid:
+                    conn.execute(text("UPDATE auth_users SET last_login = CURRENT_TIMESTAMP WHERE user_id = :u"), {"u": user_id})
+                return is_valid
+        else:
+            conn = _get_sqlite_conn()
+            cursor = conn.cursor()
+            # Get user's password hash and salt
             cursor.execute("""
-                UPDATE auth_users SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?
+                SELECT password_hash, salt FROM auth_users WHERE user_id = ?
             """, (user_id,))
-            conn.commit()
-        
-        conn.close()
-        return is_valid
+            result = cursor.fetchone()
+            if not result:
+                conn.close()
+                return False
+            password_hash, salt = result
+            # Verify password
+            is_valid = _verify_password(password, password_hash, salt)
+            if is_valid:
+                cursor.execute("""
+                    UPDATE auth_users SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?
+                """, (user_id,))
+                conn.commit()
+            conn.close()
+            return is_valid
     except Exception:
         return False
 
 def create_session(user_id: str) -> str:
     """Create a new session for a user. Returns session ID."""
     session_id = secrets.token_urlsafe(32)
-    
-    conn = sqlite3.connect(get_db_path())
-    cursor = conn.cursor()
-    
-    # Set session to expire in 24 hours
-    cursor.execute("""
-        INSERT INTO auth_sessions (session_id, user_id, expires_at) 
-        VALUES (?, ?, datetime('now', '+24 hours'))
-    """, (session_id, user_id))
-    
-    conn.commit()
-    conn.close()
-    return session_id
+    if _AUTH_USE_SQLALCHEMY:
+        from sqlalchemy import text
+        eng = get_engine()
+        assert eng is not None
+        with eng.begin() as conn:
+            conn.execute(text(
+                """
+                INSERT INTO auth_sessions (session_id, user_id, created_at, expires_at)
+                VALUES (:sid, :uid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 HOURS')
+                """
+            ), {"sid": session_id, "uid": user_id})
+        return session_id
+    else:
+        conn = _get_sqlite_conn()
+        cursor = conn.cursor()
+        # Set session to expire in 24 hours
+        cursor.execute("""
+            INSERT INTO auth_sessions (session_id, user_id, expires_at) 
+            VALUES (?, ?, datetime('now', '+24 hours'))
+        """, (session_id, user_id))
+        conn.commit()
+        conn.close()
+        return session_id
 
 def validate_session(session_id: str) -> Optional[str]:
     """Validate a session and return the user_id if valid, None if invalid/expired."""
     try:
-        conn = sqlite3.connect(get_db_path())
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT user_id FROM auth_sessions 
-            WHERE session_id = ? AND expires_at > datetime('now')
-        """, (session_id,))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        return result[0] if result else None
+        if _AUTH_USE_SQLALCHEMY:
+            from sqlalchemy import text
+            eng = get_engine()
+            assert eng is not None
+            with eng.begin() as conn:
+                result = conn.execute(text(
+                    """
+                    SELECT user_id FROM auth_sessions 
+                    WHERE session_id = :sid AND expires_at > CURRENT_TIMESTAMP
+                    """
+                ), {"sid": session_id}).fetchone()
+                return result[0] if result else None
+        else:
+            conn = _get_sqlite_conn()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT user_id FROM auth_sessions 
+                WHERE session_id = ? AND expires_at > datetime('now')
+            """, (session_id,))
+            result = cursor.fetchone()
+            conn.close()
+            return result[0] if result else None
     except Exception:
         return None
 
 def logout_session(session_id: str):
     """Logout by deleting the session."""
     try:
-        conn = sqlite3.connect(get_db_path())
-        cursor = conn.cursor()
-        
-        cursor.execute("DELETE FROM auth_sessions WHERE session_id = ?", (session_id,))
-        conn.commit()
-        conn.close()
+        if _AUTH_USE_SQLALCHEMY:
+            from sqlalchemy import text
+            eng = get_engine()
+            assert eng is not None
+            with eng.begin() as conn:
+                conn.execute(text("DELETE FROM auth_sessions WHERE session_id = :sid"), {"sid": session_id})
+        else:
+            conn = _get_sqlite_conn()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM auth_sessions WHERE session_id = ?", (session_id,))
+            conn.commit()
+            conn.close()
     except Exception:
         pass
 
 def cleanup_expired_sessions():
     """Clean up expired sessions from the database."""
     try:
-        conn = sqlite3.connect(get_db_path())
-        cursor = conn.cursor()
-        
-        cursor.execute("DELETE FROM auth_sessions WHERE expires_at <= datetime('now')")
-        conn.commit()
-        conn.close()
+        if _AUTH_USE_SQLALCHEMY:
+            from sqlalchemy import text
+            eng = get_engine()
+            assert eng is not None
+            with eng.begin() as conn:
+                conn.execute(text("DELETE FROM auth_sessions WHERE expires_at <= CURRENT_TIMESTAMP"))
+        else:
+            conn = _get_sqlite_conn()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM auth_sessions WHERE expires_at <= datetime('now')")
+            conn.commit()
+            conn.close()
     except Exception:
         pass
 

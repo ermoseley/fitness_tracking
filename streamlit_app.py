@@ -1723,6 +1723,14 @@ def show_settings():
     """Settings and configuration page"""
     st.header("⚙️ Settings")
     
+    # Show storage backend status
+    try:
+        from storage import _USE_SQLALCHEMY as _USE_PG  # type: ignore
+        backend = "PostgreSQL (Supabase)" if _USE_PG else "SQLite (local filesystem)"
+        st.info(f"Current storage backend: {backend}")
+    except Exception:
+        st.info("Current storage backend: Unknown (defaulting to SQLite)")
+
     st.subheader("📊 Analysis Settings")
     
     col1, col2 = st.columns(2)
