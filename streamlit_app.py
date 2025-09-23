@@ -123,15 +123,15 @@ def get_default_plot_range(entries):
         return None, None
     
     # Get the user's preferred default range
-    default_range_days = st.session_state.get('default_plot_range_days', 60)
+    default_range_days = float(st.session_state.get('default_plot_range_days', 60))
     
     # Calculate the total data range
     earliest_date = entries[0].entry_datetime
     latest_date = entries[-1].entry_datetime
-    total_days = (latest_date - earliest_date).days
+    span_days = (latest_date - earliest_date).total_seconds() / 86400.0
     
-    # If we have less data than the default range, show all data
-    if total_days <= default_range_days:
+    # If we have less than the default range of data, show all data
+    if span_days < default_range_days:
         return None, None
     
     # Otherwise, show the last N days
@@ -699,6 +699,8 @@ def show_dashboard():
                 height=500,
                 **layout_config
             )
+            if start_date is not None and end_date is not None:
+                fig.update_xaxes(range=[start_date, end_date])
             
             st.plotly_chart(fig, width='stretch')
             
@@ -1096,6 +1098,8 @@ def show_weight_tracking():
                     hovermode='x unified',
                     **layout_config
                 )
+                if start_date is not None and end_date is not None:
+                    fig.update_xaxes(range=[start_date, end_date])
                 
                 fig.update_xaxes(title_text="Date")
                 fig.update_yaxes(title_text="Weight (lbs)")
@@ -1189,6 +1193,8 @@ def show_weight_tracking():
                     hovermode='x unified',
                     **layout_config
                 )
+                if start_date is not None and end_date is not None:
+                    velocity_fig.update_xaxes(range=[start_date, end_date])
                 
                 velocity_fig.update_xaxes(title_text="Date")
                 velocity_fig.update_yaxes(title_text="Velocity (lbs/week)")
@@ -1418,6 +1424,8 @@ def show_body_composition():
                 height=500,
                 **layout_config
             )
+            if start_date is not None and end_date is not None:
+                fig.update_xaxes(range=[start_date, end_date])
             
             st.plotly_chart(fig, width='stretch')
     
@@ -1503,6 +1511,8 @@ def show_body_composition():
                         height=500,
                         **layout_config
                     )
+                    if start_date is not None and end_date is not None:
+                        fig.update_xaxes(range=[start_date, end_date])
                     
                     st.plotly_chart(fig, width='stretch')
                 
@@ -1559,6 +1569,8 @@ def show_body_composition():
                     height=500,
                     **layout_config
                 )
+                if start_date is not None and end_date is not None:
+                    ffmi_fig.update_xaxes(range=[start_date, end_date])
                 
                 st.plotly_chart(ffmi_fig, width='stretch')
         
