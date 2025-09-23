@@ -41,6 +41,44 @@ from kalman import (
     create_bmi_plot_from_kalman, create_ffmi_plot_from_kalman
 )
 
+
+def get_mobile_friendly_legend_config():
+    """
+    Returns a mobile-friendly legend configuration for Plotly charts.
+    Positions legend horizontally below the chart for better mobile experience.
+    """
+    return dict(
+        orientation="h",
+        yanchor="top",
+        y=-0.15,
+        xanchor="center",
+        x=0.5,
+        font=dict(size=10)
+    )
+
+
+def get_mobile_friendly_layout_config():
+    """
+    Returns layout configuration with proper margins for mobile-friendly legends.
+    """
+    return dict(
+        legend=get_mobile_friendly_legend_config(),
+        margin=dict(b=80)  # Bottom margin for legend space
+    )
+
+
+def is_mobile_device():
+    """
+    Simple mobile detection based on Streamlit's user agent.
+    Returns True if the device appears to be mobile.
+    """
+    try:
+        # Streamlit doesn't directly expose user agent, but we can use CSS media queries
+        # For now, we'll assume mobile for all devices and optimize accordingly
+        return True
+    except:
+        return True
+
 # Utilities
 def get_confidence_multiplier(confidence_setting: str) -> float:
     """Get the confidence multiplier based on the setting"""
@@ -121,7 +159,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS for better styling and mobile responsiveness
 st.markdown("""
 <style>
     .main-header {
@@ -139,6 +177,35 @@ st.markdown("""
     }
     .sidebar .sidebar-content {
         background-color: #f8f9fa;
+    }
+    
+    /* Mobile-friendly improvements */
+    @media (max-width: 768px) {
+        .main-header {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+        
+        /* Make plotly charts more mobile-friendly */
+        .js-plotly-plot .plotly {
+            overflow-x: auto;
+        }
+        
+        /* Improve sidebar on mobile */
+        .sidebar .sidebar-content {
+            padding: 1rem 0.5rem;
+        }
+        
+        /* Better spacing for metrics */
+        .stMetric {
+            margin-bottom: 0.5rem;
+        }
+    }
+    
+    /* Ensure plotly legends don't overflow on small screens */
+    .plotly .legend {
+        max-width: 100% !important;
+        overflow-x: auto !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -560,7 +627,8 @@ def show_dashboard():
                 xaxis_title="Date",
                 yaxis_title="Weight (lbs)",
                 hovermode='x unified',
-                height=500
+                height=500,
+                **get_mobile_friendly_layout_config()
             )
             
             st.plotly_chart(fig, width='stretch')
@@ -950,7 +1018,16 @@ def show_weight_tracking():
                 fig.update_layout(
                     title="Kalman Filter Analysis: Weight Trend",
                     height=500,
-                    hovermode='x unified'
+                    hovermode='x unified',
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.15,
+                        xanchor="center",
+                        x=0.5,
+                        font=dict(size=10)
+                    ),
+                    margin=dict(b=80)  # Add bottom margin for legend
                 )
                 
                 fig.update_xaxes(title_text="Date")
@@ -1036,7 +1113,16 @@ def show_weight_tracking():
                     title="Weight Change Velocity",
                     height=400,
                     hovermode='x unified',
-                    yaxis=dict(range=[-3, 3])  # Set y-range to -3 to +3 lbs/week
+                    yaxis=dict(range=[-3, 3]),  # Set y-range to -3 to +3 lbs/week
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.15,
+                        xanchor="center",
+                        x=0.5,
+                        font=dict(size=10)
+                    ),
+                    margin=dict(b=80)  # Add bottom margin for legend
                 )
                 
                 velocity_fig.update_xaxes(title_text="Date")
@@ -1133,7 +1219,16 @@ def show_weight_tracking():
                         xaxis_title="Residual (Raw Weight - Kalman Weight) [lbs]",
                         yaxis_title="Density",
                         height=500,
-                        showlegend=True
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="top",
+                            y=-0.15,
+                            xanchor="center",
+                            x=0.5,
+                            font=dict(size=10)
+                        ),
+                        margin=dict(b=80)  # Add bottom margin for legend
                     )
                     
                     st.plotly_chart(fig_hist, width='stretch')
@@ -1259,7 +1354,8 @@ def show_body_composition():
                 title="BMI Trend Over Time",
                 xaxis_title="Date",
                 yaxis_title="BMI",
-                height=500
+                height=500,
+                **get_mobile_friendly_layout_config()
             )
             
             st.plotly_chart(fig, width='stretch')
@@ -1337,7 +1433,16 @@ def show_body_composition():
                         title="Body Fat Percentage Trend (Kalman Filtered)",
                         xaxis_title="Date",
                         yaxis_title="Body Fat %",
-                        height=500
+                        height=500,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="top",
+                            y=-0.15,
+                            xanchor="center",
+                            x=0.5,
+                            font=dict(size=10)
+                        ),
+                        margin=dict(b=80)  # Add bottom margin for legend
                     )
                     
                     st.plotly_chart(fig, width='stretch')
@@ -1386,7 +1491,16 @@ def show_body_composition():
                     title="Fat-Free Mass Index (FFMI) Trend (Kalman Filtered)",
                     xaxis_title="Date",
                     yaxis_title="FFMI",
-                    height=500
+                    height=500,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.15,
+                        xanchor="center",
+                        x=0.5,
+                        font=dict(size=10)
+                    ),
+                    margin=dict(b=80)  # Add bottom margin for legend
                 )
                 
                 st.plotly_chart(ffmi_fig, width='stretch')
