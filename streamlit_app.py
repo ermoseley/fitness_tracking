@@ -1204,30 +1204,13 @@ def show_weight_tracking():
                     # Add vertical lines for statistics
                     ci_mult = get_confidence_multiplier(st.session_state.confidence_interval)
                     
-                    # Mean line (no annotation for mobile-friendly display)
-                    fig_hist.add_vline(
-                        x=mean_residual, 
-                        line_dash="dash", 
-                        line_color="green"
-                    )
-                    
-                    # Confidence interval lines (no annotations for mobile-friendly display)
-                    fig_hist.add_vline(
-                        x=ci_mult * std_residual, 
-                        line_dash="dot", 
-                        line_color="red"
-                    )
-                    fig_hist.add_vline(
-                        x=-ci_mult * std_residual, 
-                        line_dash="dot", 
-                        line_color="red"
-                    )
-                    
-                    # Add invisible traces for legend entries (mobile-friendly)
+                    # Add traces for legend entries (mobile-friendly, no duplicate lines)
                     y_max = max(normal_dist) * 1.1
+                    y_min = 0  # Don't extend below zero
+                    
                     fig_hist.add_trace(go.Scatter(
                         x=[mean_residual, mean_residual],
-                        y=[0, y_max],
+                        y=[y_min, y_max],
                         mode='lines',
                         line=dict(color='green', dash='dash'),
                         name=f"Mean = {mean_residual:.3f}",
@@ -1237,7 +1220,7 @@ def show_weight_tracking():
                     
                     fig_hist.add_trace(go.Scatter(
                         x=[ci_mult * std_residual, ci_mult * std_residual],
-                        y=[0, y_max],
+                        y=[y_min, y_max],
                         mode='lines',
                         line=dict(color='red', dash='dot'),
                         name=f"+{ci_mult:.1f}σ = {ci_mult * std_residual:.3f}",
@@ -1247,7 +1230,7 @@ def show_weight_tracking():
                     
                     fig_hist.add_trace(go.Scatter(
                         x=[-ci_mult * std_residual, -ci_mult * std_residual],
-                        y=[0, y_max],
+                        y=[y_min, y_max],
                         mode='lines',
                         line=dict(color='red', dash='dot'),
                         name=f"-{ci_mult:.1f}σ = {-ci_mult * std_residual:.3f}",
