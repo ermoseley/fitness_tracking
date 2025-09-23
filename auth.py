@@ -27,15 +27,9 @@ except Exception:
 try:
     import streamlit as st  # type: ignore
     _st = st  # alias used elsewhere in this module
-    # Optional cookie manager for persistence across refresh
-    try:
-        from streamlit_cookies_manager import EncryptedCookieManager  # type: ignore
-    except Exception:
-        EncryptedCookieManager = None  # type: ignore
 except Exception:  # pragma: no cover - not running in streamlit
     st = None  # type: ignore
     _st = None  # type: ignore
-    EncryptedCookieManager = None  # type: ignore
 
 def _get_sqlite_conn():
     return sqlite3.connect(get_db_path())
@@ -54,42 +48,52 @@ def _verify_password(password: str, hashed_password: str, salt: str) -> bool:
     test_hash, _ = _hash_password(password, salt)
     return test_hash == hashed_password
 
-# -------------------- Cookie helpers --------------------
-_COOKIE_NAME = "bm_auth_sid"
-
-def _get_cookie_manager():
-    """Return an initialized cookie manager if available in Streamlit context."""
-    if _st is None or EncryptedCookieManager is None:
-        return None
-    cm = EncryptedCookieManager(
-        prefix="bodymetrics",
-        password=os.environ.get("COOKIE_PASSWORD", "change-me-please"),
-    )
-    if not cm.ready():
-        _st.stop()
-    return cm
-
-def _set_session_cookie(session_id: str):
-    cm = _get_cookie_manager()
-    if cm is None:
+# -------------------- Session persistence helpers --------------------
+def _set_session_persistence(session_id: str):
+    """Set session persistence using query parameters as fallback."""
+    if _st is None:
         return
-    cm[_COOKIE_NAME] = session_id
-    cm.save()
+    
+    # Store in session state
+    _st.session_state.auth_session_id = session_id
+    
+    # Use query parameters as a fallback for refresh persistence
+    # This is less secure but works reliably across refreshes
+    _st.query_params["sid"] = session_id
 
-def _get_session_cookie() -> Optional[str]:
-    cm = _get_cookie_manager()
-    if cm is None:
+def _get_session_persistence() -> Optional[str]:
+    """Get session from query parameters or session state."""
+    if _st is None:
         return None
-    return cm.get(_COOKIE_NAME)
+    
+    # Try session state first
+    session_id = _st.session_state.get("auth_session_id")
+    if session_id:
+        return session_id
+    
+    # Fallback to query parameters
+    session_id = _st.query_params.get("sid")
+    if session_id:
+        # Store in session state for this session
+        _st.session_state.auth_session_id = session_id
+        return session_id
+    
+    return None
 
-def _clear_session_cookie():
-    cm = _get_cookie_manager()
-    if cm is None:
+def _clear_session_persistence():
+    """Clear session persistence."""
+    if _st is None:
         return
-    try:
-        del cm[_COOKIE_NAME]
-        cm.save()
-    except Exception:
+    
+    # Clear session state
+    if "auth_session_id" in _st.session_state:
+        del _st.session_state.auth_session_id
+    if "user_id" in _st.session_state:
+        del _st.session_state.user_id
+    
+    # Clear query parameters
+    if "sid" in _st.query_params:
+        # Note: We can't directly modify query_params, but the session will be invalid anyway
         pass
 
 def init_auth_tables():
@@ -323,25 +327,16 @@ def get_current_user() -> Optional[str]:
     if _st is None:
         return None
     
-    # Try session_state first
-    session_id = _st.session_state.get("auth_session_id")
-    # If not present, attempt to restore from cookie
-    if not session_id:
-        cookie_sid = _get_session_cookie()
-        if cookie_sid:
-            _st.session_state.auth_session_id = cookie_sid
-            session_id = cookie_sid
+    # Try to get session from persistence (query params or session state)
+    session_id = _get_session_persistence()
     if not session_id:
         return None
     
     user_id = validate_session(session_id)
     
     # If session is invalid/expired, clean up session state
-    if user_id is None and "auth_session_id" in _st.session_state:
-        del _st.session_state.auth_session_id
-        if "user_id" in _st.session_state:
-            del _st.session_state.user_id
-        _clear_session_cookie()
+    if user_id is None:
+        _clear_session_persistence()
     
     return user_id
 
@@ -382,10 +377,9 @@ def show_auth_form():
                 elif authenticate_user(user_id, password):
                     # Create session and store in session state
                     session_id = create_session(user_id)
-                    _st.session_state.auth_session_id = session_id
                     _st.session_state.user_id = user_id
-                    # Persist in cookie for refresh persistence
-                    _set_session_cookie(session_id)
+                    # Set session persistence
+                    _set_session_persistence(session_id)
                     _st.rerun()
                 else:
                     st.error("Invalid User ID or Password")
@@ -422,11 +416,7 @@ def logout():
     if session_id:
         logout_session(session_id)
     
-    # Clear session state
-    if "auth_session_id" in _st.session_state:
-        del _st.session_state.auth_session_id
-    if "user_id" in _st.session_state:
-        del _st.session_state.user_id
-    _clear_session_cookie()
+    # Clear session persistence
+    _clear_session_persistence()
     
     _st.rerun()

@@ -6,4 +6,3 @@ scipy>=1.16.0
 matplotlib>=3.5.0
 SQLAlchemy>=2.0.0
 psycopg2-binary>=2.9.9
-streamlit-cookies-manager>=0.2.0
