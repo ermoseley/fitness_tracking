@@ -423,62 +423,122 @@ def get_preferences_for_user(user_id: str) -> Dict[str, object]:
     if _USE_SQLALCHEMY:
         from sqlalchemy import text  # type: ignore
         with db_cursor() as conn:
-            row = conn.execute(text("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days FROM user_preferences WHERE user_id=:uid;"), {"uid": user_id}).fetchone()
-        if not row:
-            return {}
-        return {
-            "confidence_interval": row[0],
-            "enable_forecast": bool(row[1]),
-            "forecast_days": int(row[2]),
-            "residuals_bins": int(row[3]),
-            "default_plot_range_days": int(row[4]),
-        }
+            # Try to get all columns including the new one
+            try:
+                row = conn.execute(text("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days FROM user_preferences WHERE user_id=:uid;"), {"uid": user_id}).fetchone()
+                if not row:
+                    return {}
+                return {
+                    "confidence_interval": row[0],
+                    "enable_forecast": bool(row[1]),
+                    "forecast_days": int(row[2]),
+                    "residuals_bins": int(row[3]),
+                    "default_plot_range_days": int(row[4]),
+                }
+            except Exception:
+                # Fallback to old schema if new column doesn't exist
+                row = conn.execute(text("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins FROM user_preferences WHERE user_id=:uid;"), {"uid": user_id}).fetchone()
+                if not row:
+                    return {}
+                return {
+                    "confidence_interval": row[0],
+                    "enable_forecast": bool(row[1]),
+                    "forecast_days": int(row[2]),
+                    "residuals_bins": int(row[3]),
+                    "default_plot_range_days": 60,  # Default value
+                }
     else:
         with db_cursor() as cur:
-            cur.execute("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days FROM user_preferences WHERE user_id=?;", (user_id,))
-            row = cur.fetchone()
-        if not row:
-            return {}
-        return {
-            "confidence_interval": row[0],
-            "enable_forecast": bool(row[1]),
-            "forecast_days": int(row[2]),
-            "residuals_bins": int(row[3]),
-            "default_plot_range_days": int(row[4]),
-        }
+            # Try to get all columns including the new one
+            try:
+                cur.execute("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days FROM user_preferences WHERE user_id=?;", (user_id,))
+                row = cur.fetchone()
+                if not row:
+                    return {}
+                return {
+                    "confidence_interval": row[0],
+                    "enable_forecast": bool(row[1]),
+                    "forecast_days": int(row[2]),
+                    "residuals_bins": int(row[3]),
+                    "default_plot_range_days": int(row[4]),
+                }
+            except Exception:
+                # Fallback to old schema if new column doesn't exist
+                cur.execute("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins FROM user_preferences WHERE user_id=?;", (user_id,))
+                row = cur.fetchone()
+                if not row:
+                    return {}
+                return {
+                    "confidence_interval": row[0],
+                    "enable_forecast": bool(row[1]),
+                    "forecast_days": int(row[2]),
+                    "residuals_bins": int(row[3]),
+                    "default_plot_range_days": 60,  # Default value
+                }
 
 
 def set_preferences_for_user(user_id: str, confidence_interval: str, enable_forecast: bool, forecast_days: int, residuals_bins: int, default_plot_range_days: int = 60) -> None:
     if _USE_SQLALCHEMY:
         from sqlalchemy import text  # type: ignore
         with db_cursor() as conn:
-            conn.execute(text(
-                """
-                INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days)
-                VALUES (:uid, :ci, :ef, :fd, :rb, :dr)
-                ON CONFLICT (user_id) DO UPDATE SET
-                    confidence_interval=excluded.confidence_interval,
-                    enable_forecast=excluded.enable_forecast,
-                    forecast_days=excluded.forecast_days,
-                    residuals_bins=excluded.residuals_bins,
-                    default_plot_range_days=excluded.default_plot_range_days;
-                """
-            ), {"uid": user_id, "ci": confidence_interval, "ef": 1 if enable_forecast else 0, "fd": int(forecast_days), "rb": int(residuals_bins), "dr": int(default_plot_range_days)})
+            try:
+                # Try to use the new schema with default_plot_range_days
+                conn.execute(text(
+                    """
+                    INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days)
+                    VALUES (:uid, :ci, :ef, :fd, :rb, :dr)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        confidence_interval=excluded.confidence_interval,
+                        enable_forecast=excluded.enable_forecast,
+                        forecast_days=excluded.forecast_days,
+                        residuals_bins=excluded.residuals_bins,
+                        default_plot_range_days=excluded.default_plot_range_days;
+                    """
+                ), {"uid": user_id, "ci": confidence_interval, "ef": 1 if enable_forecast else 0, "fd": int(forecast_days), "rb": int(residuals_bins), "dr": int(default_plot_range_days)})
+            except Exception:
+                # Fallback to old schema if new column doesn't exist
+                conn.execute(text(
+                    """
+                    INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins)
+                    VALUES (:uid, :ci, :ef, :fd, :rb)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        confidence_interval=excluded.confidence_interval,
+                        enable_forecast=excluded.enable_forecast,
+                        forecast_days=excluded.forecast_days,
+                        residuals_bins=excluded.residuals_bins;
+                    """
+                ), {"uid": user_id, "ci": confidence_interval, "ef": 1 if enable_forecast else 0, "fd": int(forecast_days), "rb": int(residuals_bins)})
     else:
         with db_cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    confidence_interval=excluded.confidence_interval,
-                    enable_forecast=excluded.enable_forecast,
-                    forecast_days=excluded.forecast_days,
-                    residuals_bins=excluded.residuals_bins,
-                    default_plot_range_days=excluded.default_plot_range_days;
-                """,
-                (user_id, confidence_interval, 1 if enable_forecast else 0, int(forecast_days), int(residuals_bins), int(default_plot_range_days))
-            )
+            try:
+                # Try to use the new schema with default_plot_range_days
+                cur.execute(
+                    """
+                    INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        confidence_interval=excluded.confidence_interval,
+                        enable_forecast=excluded.enable_forecast,
+                        forecast_days=excluded.forecast_days,
+                        residuals_bins=excluded.residuals_bins,
+                        default_plot_range_days=excluded.default_plot_range_days;
+                    """,
+                    (user_id, confidence_interval, 1 if enable_forecast else 0, int(forecast_days), int(residuals_bins), int(default_plot_range_days))
+                )
+            except Exception:
+                # Fallback to old schema if new column doesn't exist
+                cur.execute(
+                    """
+                    INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        confidence_interval=excluded.confidence_interval,
+                        enable_forecast=excluded.enable_forecast,
+                        forecast_days=excluded.forecast_days,
+                        residuals_bins=excluded.residuals_bins;
+                    """,
+                    (user_id, confidence_interval, 1 if enable_forecast else 0, int(forecast_days), int(residuals_bins))
+                )
 
 
 # -------------------------
