@@ -130,6 +130,10 @@ def get_default_plot_range(entries):
     latest_date = entries[-1].entry_datetime
     span_days = (latest_date - earliest_date).total_seconds() / 86400.0
     
+    # Special case: if slider is at maximum (365 days), show all data regardless
+    if default_range_days >= 365:
+        return None, None
+    
     # If we have less than the default range of data, show all data
     if span_days < default_range_days:
         return None, None
@@ -1725,7 +1729,7 @@ def show_settings():
             min_value=7,
             max_value=365,
             value=st.session_state.default_plot_range_days,
-            help="Default time range shown on plots (you can still zoom out to see all data)"
+            help="Default time range shown on plots. Set to 365 days to show all available data. You can still zoom out to see all data regardless of this setting."
         )
         
         # Y-axis padding setting
