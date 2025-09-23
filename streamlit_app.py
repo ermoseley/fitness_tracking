@@ -876,10 +876,17 @@ def show_add_entries():
                     
                     # Reload data
                     load_data_files()
-                    st.success("✅ Entry Added")
+                    # Set success message in session state
+                    st.session_state.weight_success_message = "✅ Entry Added"
                     st.rerun()
                 else:
                     st.error("Please enter a valid weight value")
+            
+            # Display success message if it exists
+            if hasattr(st.session_state, 'weight_success_message') and st.session_state.weight_success_message:
+                st.success(st.session_state.weight_success_message)
+                # Clear the message after displaying
+                del st.session_state.weight_success_message
     
     with tab2:
         st.write("**Add LBM Entry**")
@@ -903,10 +910,17 @@ def show_add_entries():
                     
                     # Reload data
                     load_data_files()
-                    st.success("✅ Entry Added")
+                    # Set success message in session state
+                    st.session_state.lbm_success_message = "✅ Entry Added"
                     st.rerun()
                 else:
                     st.error("Please enter a valid LBM value")
+            
+            # Display success message if it exists
+            if hasattr(st.session_state, 'lbm_success_message') and st.session_state.lbm_success_message:
+                st.success(st.session_state.lbm_success_message)
+                # Clear the message after displaying
+                del st.session_state.lbm_success_message
     
     with tab3:
         st.write("**Add Body Fat % Entry**")
@@ -941,7 +955,8 @@ def show_add_entries():
                                 
                                 # Reload data
                                 load_data_files()
-                                st.success("✅ Entry Added")
+                                # Set success message in session state
+                                st.session_state.bf_success_message = "✅ Entry Added"
                                 st.rerun()
                             else:
                                 st.error("Failed to get current weight estimate. Please add weight entries first.")
@@ -951,6 +966,12 @@ def show_add_entries():
                         st.error("No weight data available. Please add weight entries first.")
                 else:
                     st.error("Body fat percentage must be between 0 and 100")
+            
+            # Display success message if it exists
+            if hasattr(st.session_state, 'bf_success_message') and st.session_state.bf_success_message:
+                st.success(st.session_state.bf_success_message)
+                # Clear the message after displaying
+                del st.session_state.bf_success_message
 
 def show_weight_tracking():
     """Weight tracking page with detailed analysis"""
@@ -1910,7 +1931,7 @@ def show_data_management():
         
         if lbm_file is not None:
             try:
-                # Try to read the CSV file
+                # Try to read the CSV file with headers first
                 df = pd.read_csv(lbm_file)
                 
                 # Check if we have the required columns
@@ -1936,36 +1957,50 @@ def show_data_management():
                     # Try to handle files without proper headers
                     st.warning("CSV doesn't have 'date' and 'lbm' columns. Attempting to fix...")
                     
-                    if len(df.columns) >= 2:
-                        # Assume first column is date, second is lbm
-                        df_fixed = pd.DataFrame()
-                        df_fixed['date'] = df.iloc[:, 0]
-                        df_fixed['lbm'] = pd.to_numeric(df.iloc[:, 1], errors='coerce')
-                        
-                        # Remove rows with invalid data
+                    # Try reading without headers (treat first row as data)
+                    try:
+                        df_no_header = pd.read_csv(lbm_file, header=None)
+                        if len(df_no_header.columns) >= 2:
+                            # Assume first column is date, second is lbm
+                            df_fixed = pd.DataFrame()
+                            df_fixed['date'] = df_no_header.iloc[:, 0]
+                            df_fixed['lbm'] = pd.to_numeric(df_no_header.iloc[:, 1], errors='coerce')
+                        else:
+                            raise ValueError("Not enough columns")
+                    except Exception:
+                        # Fallback to original logic if no-header reading fails
+                        if len(df.columns) >= 2:
+                            # Assume first column is date, second is lbm
+                            df_fixed = pd.DataFrame()
+                            df_fixed['date'] = df.iloc[:, 0]
+                            df_fixed['lbm'] = pd.to_numeric(df.iloc[:, 1], errors='coerce')
+                        else:
+                            raise ValueError("Not enough columns")
+                    
+                    # Remove rows with invalid data
+                    df_fixed = df_fixed.dropna()
+                    
+                    if len(df_fixed) > 0:
+                        # Convert date column
+                        df_fixed['date'] = pd.to_datetime(df_fixed['date'], errors='coerce')
                         df_fixed = df_fixed.dropna()
                         
                         if len(df_fixed) > 0:
-                            # Convert date column
-                            df_fixed['date'] = pd.to_datetime(df_fixed['date'], errors='coerce')
-                            df_fixed = df_fixed.dropna()
+                            # Replace user's LBM data in DB (auto-fixed format)
+                            user_id = get_current_user()
+                            if user_id:
+                                replace_lbm_for_user(sanitize_user_id(user_id), df_fixed)
                             
-                            if len(df_fixed) > 0:
-                                # Replace user's LBM data in DB (auto-fixed format)
-                                user_id = get_current_user()
-                                if user_id:
-                                    replace_lbm_for_user(sanitize_user_id(user_id), df_fixed)
-                                
-                                # Reload data
-                                load_data_files()
-                                st.success(f"Successfully uploaded {len(df_fixed)} LBM entries (auto-fixed format)")
-                                st.rerun()
-                            else:
-                                st.error("Could not parse dates in the CSV file")
+                            # Reload data
+                            load_data_files()
+                            st.success(f"Successfully uploaded {len(df_fixed)} LBM entries (auto-fixed format)")
+                            st.rerun()
                         else:
-                            st.error("Could not parse LBM values in the CSV file")
+                            st.error("Could not parse dates in the CSV file")
                     else:
-                        st.error("CSV must have at least 2 columns (date and lbm)")
+                        st.error("Could not parse LBM values in the CSV file")
+                else:
+                    st.error("CSV must have at least 2 columns (date and lbm)")
             except Exception as e:
                 st.error(f"Error processing file: {e}")
                 st.info("Please ensure your CSV has 'date' and 'lbm' columns, or at least 2 columns with date in first column and LBM values in second column.")
@@ -2186,8 +2221,15 @@ def show_data_management():
                 if user_id:
                     insert_weight_for_user(sanitize_user_id(user_id), entry_datetime, float(manual_weight_value))
                     load_data_files()
-                    st.success("✅ Entry Added")
+                    # Set success message in session state
+                    st.session_state.manual_weight_success_message = "✅ Entry Added"
                     st.rerun()
+        
+        # Display success message if it exists
+        if hasattr(st.session_state, 'manual_weight_success_message') and st.session_state.manual_weight_success_message:
+            st.success(st.session_state.manual_weight_success_message)
+            # Clear the message after displaying
+            del st.session_state.manual_weight_success_message
         
         # Manual LBM Entry
         st.write("**Add LBM Entry**")
@@ -2212,8 +2254,15 @@ def show_data_management():
                     })
                     insert_lbm_for_user(sanitize_user_id(user_id), lbm_df)
                     load_data_files()
-                    st.success("✅ Entry Added")
+                    # Set success message in session state
+                    st.session_state.manual_lbm_success_message = "✅ Entry Added"
                     st.rerun()
+        
+        # Display success message if it exists (for LBM entry)
+        if hasattr(st.session_state, 'manual_lbm_success_message') and st.session_state.manual_lbm_success_message:
+            st.success(st.session_state.manual_lbm_success_message)
+            # Clear the message after displaying
+            del st.session_state.manual_lbm_success_message
     
     with tab3:
         st.write("**Bulk operations on your data**")
