@@ -1846,9 +1846,7 @@ def create_residuals_histogram(residuals: List[float],
     
     # Add vertical lines at ±1 and ±2 standard deviations
     plt.axvline(std_residual, color='orange', linestyle=':', alpha=0.7, 
-                label=f'+1σ = {std_residual:.3f}')
-    plt.axvline(-std_residual, color='orange', linestyle=':', alpha=0.7, 
-                label=f'-1σ = {-std_residual:.3f}')
+                label=f'±1σ = {std_residual:.3f}')
     plt.axvline(ci_multiplier*std_residual, color='red', linestyle=':', alpha=0.7, 
                 label=f'+{ci_multiplier:.1f}σ = {ci_multiplier*std_residual:.3f}')
     plt.axvline(-ci_multiplier*std_residual, color='red', linestyle=':', alpha=0.7, 
