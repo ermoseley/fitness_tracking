@@ -75,30 +75,29 @@ def get_velocity_mobile_layout_config():
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.30,  # Lower than default for velocity plots
+            y=-0.35,  # Even lower for more space from x-axis labels
             xanchor="center",
             x=0.5,
             font=dict(size=10)
         ),
-        margin=dict(b=110)  # Extra bottom margin for velocity plots
+        margin=dict(b=120)  # Extra bottom margin for velocity plots
     )
 
 
 def get_residuals_mobile_layout_config():
     """
     Returns layout configuration for residuals plots with extra space for legend.
-    Keeps original positioning as requested.
     """
     return dict(
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.15,  # Keep original positioning for residuals plot
+            y=-0.25,  # Lower for more space from x-axis labels
             xanchor="center",
             x=0.5,
             font=dict(size=10)
         ),
-        margin=dict(b=100)  # Extra bottom margin for residuals plots with legend
+        margin=dict(b=110)  # Extra bottom margin for residuals plots with legend
     )
 
 
