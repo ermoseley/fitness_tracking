@@ -500,6 +500,14 @@ def main():
     # Main header
     st.markdown('<h1 class="main-header"> BodyMetrics</h1>', unsafe_allow_html=True)
     
+    # Global storage backend indicator in sidebar
+    try:
+        from storage import _USE_SQLALCHEMY as _USE_PG  # type: ignore
+        backend_label = "PostgreSQL (Supabase)" if _USE_PG else "SQLite (local filesystem)"
+        st.sidebar.caption(f"Storage: {backend_label}")
+    except Exception:
+        st.sidebar.caption("Storage: Unknown")
+    
     # Sidebar
     with st.sidebar:
         # User profile / logout
