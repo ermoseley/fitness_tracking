@@ -624,11 +624,11 @@ def show_dashboard():
                 # Generate forecast data using configurable duration
                 forecast_days = int(st.session_state.forecast_days)
                 latest_date = ensure_py_datetime(dense_datetimes[-1])
-                forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(1, forecast_days + 1)]
+                forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(0, forecast_days + 1)]
                 forecast_weights = []
                 forecast_uncertainties = []
                 
-                for i in range(1, forecast_days + 1):
+                for i in range(0, forecast_days + 1):
                     weight, std = kf.forecast(float(i))
                     forecast_weights.append(weight)
                     forecast_uncertainties.append(std)
@@ -1049,11 +1049,11 @@ def show_weight_tracking():
                     # Generate forecast data using configurable duration
                     forecast_days = int(st.session_state.forecast_days)
                     latest_date = ensure_py_datetime(dense_datetimes[-1])
-                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(1, forecast_days + 1)]
+                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(0, forecast_days + 1)]
                     forecast_weights = []
                     forecast_uncertainties = []
                     
-                    for i in range(1, forecast_days + 1):
+                    for i in range(0, forecast_days + 1):
                         weight, std = kf.forecast(float(i))
                         forecast_weights.append(weight)
                         forecast_uncertainties.append(std)
@@ -1083,34 +1083,23 @@ def show_weight_tracking():
                     marker=dict(size=8, color='blue', opacity=0.7)
                 ))
                 
-                # Add dense smoothed estimate curve (historical portion)
+                # Add combined historical and forecast trend line
                 fig.add_trace(go.Scatter(
-                    x=dense_datetimes,
-                    y=dense_means,
+                    x=combined_dates,
+                    y=combined_means,
                     mode='lines',
-                    name='Smoothed Trend',
+                    name='Smoothed Trend + Forecast',
                     line=dict(color='red', width=2)
                 ))
                 
-                # Add forecast portion with dashed line and fading opacity
-                if st.session_state.enable_forecast:
-                    fig.add_trace(go.Scatter(
-                        x=forecast_dates,
-                        y=forecast_weights,
-                        mode='lines',
-                        name='Forecast',
-                        line=dict(color='red', width=2, dash='dash'),
-                        opacity=0.7  # Overall opacity for the trace
-                    ))
-                
-                # Add smooth confidence intervals (historical portion)
+                # Add smooth confidence intervals (combined historical + forecast)
                 ci_multiplier = get_confidence_multiplier(st.session_state.confidence_interval)
-                hist_upper_bound = [mean + ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
-                hist_lower_bound = [mean - ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
+                combined_upper_bound = [mean + ci_multiplier * std for mean, std in zip(combined_means, combined_stds)]
+                combined_lower_bound = [mean - ci_multiplier * std for mean, std in zip(combined_means, combined_stds)]
                 
                 fig.add_trace(go.Scatter(
-                    x=dense_datetimes,
-                    y=hist_upper_bound,
+                    x=combined_dates,
+                    y=combined_upper_bound,
                     mode='lines',
                     line=dict(width=0),
                     showlegend=False,
@@ -1118,8 +1107,8 @@ def show_weight_tracking():
                 ))
                 
                 fig.add_trace(go.Scatter(
-                    x=dense_datetimes,
-                    y=hist_lower_bound,
+                    x=combined_dates,
+                    y=combined_lower_bound,
                     mode='lines',
                     line=dict(width=0),
                     fill='tonexty',
@@ -1128,32 +1117,6 @@ def show_weight_tracking():
                     hoverinfo='skip'
                 ))
                 
-                # Add forecast confidence intervals with fading opacity
-                if st.session_state.enable_forecast:
-                    forecast_upper_bound = [mean + ci_multiplier * std for mean, std in zip(forecast_weights, forecast_uncertainties)]
-                    forecast_lower_bound = [mean - ci_multiplier * std for mean, std in zip(forecast_weights, forecast_uncertainties)]
-                    
-                    fig.add_trace(go.Scatter(
-                        x=forecast_dates,
-                        y=forecast_upper_bound,
-                        mode='lines',
-                        line=dict(width=0),
-                        showlegend=False,
-                        hoverinfo='skip',
-                        opacity=0.5
-                    ))
-                    
-                    fig.add_trace(go.Scatter(
-                        x=forecast_dates,
-                        y=forecast_lower_bound,
-                        mode='lines',
-                        line=dict(width=0),
-                        fill='tonexty',
-                        fillcolor='rgba(255,0,0,0.1)',
-                        name=f'Forecast {st.session_state.confidence_interval} CI',
-                        hoverinfo='skip',
-                        opacity=0.5
-                    ))
                 
                 
                 # Set default plot range based on user preference
