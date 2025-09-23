@@ -38,7 +38,7 @@ _DATABASE_URL: Optional[str] = None
 if _st is not None:
     try:
         # Prefer secrets if available
-        _DATABASE_URL = _st.secrets.get("DATABASE_URL", None)  # type: ignore[attr-defined]
+        _DATABASE_URL = _st.secrets.get("DATABASE_URLPOR", None)  # type: ignore[attr-defined]
     except Exception:
         _DATABASE_URL = None
 if not _DATABASE_URL:
