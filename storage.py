@@ -158,7 +158,8 @@ def init_database() -> None:
                     confidence_interval TEXT NOT NULL DEFAULT '1σ',
                     enable_forecast INTEGER NOT NULL DEFAULT 1,
                     forecast_days INTEGER NOT NULL DEFAULT 30,
-                    residuals_bins INTEGER NOT NULL DEFAULT 15
+                    residuals_bins INTEGER NOT NULL DEFAULT 15,
+                    default_plot_range_days INTEGER NOT NULL DEFAULT 60
                 );
                 """
             ))
@@ -203,7 +204,8 @@ def init_database() -> None:
                     confidence_interval TEXT NOT NULL DEFAULT '1σ',
                     enable_forecast INTEGER NOT NULL DEFAULT 1,
                     forecast_days INTEGER NOT NULL DEFAULT 30,
-                    residuals_bins INTEGER NOT NULL DEFAULT 15
+                    residuals_bins INTEGER NOT NULL DEFAULT 15,
+                    default_plot_range_days INTEGER NOT NULL DEFAULT 60
                 );
                 """
             )
@@ -421,7 +423,7 @@ def get_preferences_for_user(user_id: str) -> Dict[str, object]:
     if _USE_SQLALCHEMY:
         from sqlalchemy import text  # type: ignore
         with db_cursor() as conn:
-            row = conn.execute(text("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins FROM user_preferences WHERE user_id=:uid;"), {"uid": user_id}).fetchone()
+            row = conn.execute(text("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days FROM user_preferences WHERE user_id=:uid;"), {"uid": user_id}).fetchone()
         if not row:
             return {}
         return {
@@ -429,10 +431,11 @@ def get_preferences_for_user(user_id: str) -> Dict[str, object]:
             "enable_forecast": bool(row[1]),
             "forecast_days": int(row[2]),
             "residuals_bins": int(row[3]),
+            "default_plot_range_days": int(row[4]),
         }
     else:
         with db_cursor() as cur:
-            cur.execute("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins FROM user_preferences WHERE user_id=?;", (user_id,))
+            cur.execute("SELECT confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days FROM user_preferences WHERE user_id=?;", (user_id,))
             row = cur.fetchone()
         if not row:
             return {}
@@ -441,37 +444,40 @@ def get_preferences_for_user(user_id: str) -> Dict[str, object]:
             "enable_forecast": bool(row[1]),
             "forecast_days": int(row[2]),
             "residuals_bins": int(row[3]),
+            "default_plot_range_days": int(row[4]),
         }
 
 
-def set_preferences_for_user(user_id: str, confidence_interval: str, enable_forecast: bool, forecast_days: int, residuals_bins: int) -> None:
+def set_preferences_for_user(user_id: str, confidence_interval: str, enable_forecast: bool, forecast_days: int, residuals_bins: int, default_plot_range_days: int = 60) -> None:
     if _USE_SQLALCHEMY:
         from sqlalchemy import text  # type: ignore
         with db_cursor() as conn:
             conn.execute(text(
                 """
-                INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins)
-                VALUES (:uid, :ci, :ef, :fd, :rb)
+                INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days)
+                VALUES (:uid, :ci, :ef, :fd, :rb, :dr)
                 ON CONFLICT (user_id) DO UPDATE SET
                     confidence_interval=excluded.confidence_interval,
                     enable_forecast=excluded.enable_forecast,
                     forecast_days=excluded.forecast_days,
-                    residuals_bins=excluded.residuals_bins;
+                    residuals_bins=excluded.residuals_bins,
+                    default_plot_range_days=excluded.default_plot_range_days;
                 """
-            ), {"uid": user_id, "ci": confidence_interval, "ef": 1 if enable_forecast else 0, "fd": int(forecast_days), "rb": int(residuals_bins)})
+            ), {"uid": user_id, "ci": confidence_interval, "ef": 1 if enable_forecast else 0, "fd": int(forecast_days), "rb": int(residuals_bins), "dr": int(default_plot_range_days)})
     else:
         with db_cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO user_preferences(user_id, confidence_interval, enable_forecast, forecast_days, residuals_bins, default_plot_range_days)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     confidence_interval=excluded.confidence_interval,
                     enable_forecast=excluded.enable_forecast,
                     forecast_days=excluded.forecast_days,
-                    residuals_bins=excluded.residuals_bins;
+                    residuals_bins=excluded.residuals_bins,
+                    default_plot_range_days=excluded.default_plot_range_days;
                 """,
-                (user_id, confidence_interval, 1 if enable_forecast else 0, int(forecast_days), int(residuals_bins))
+                (user_id, confidence_interval, 1 if enable_forecast else 0, int(forecast_days), int(residuals_bins), int(default_plot_range_days))
             )
 
 

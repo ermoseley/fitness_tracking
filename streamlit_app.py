@@ -113,6 +113,31 @@ def is_mobile_device():
     except:
         return True
 
+
+def get_default_plot_range(entries):
+    """
+    Calculate the default plot range based on user preference and available data.
+    Returns (start_date, end_date) or (None, None) for full range.
+    """
+    if not entries or len(entries) == 0:
+        return None, None
+    
+    # Get the user's preferred default range
+    default_range_days = st.session_state.get('default_plot_range_days', 60)
+    
+    # Calculate the total data range
+    earliest_date = entries[0].entry_datetime
+    latest_date = entries[-1].entry_datetime
+    total_days = (latest_date - earliest_date).days
+    
+    # If we have less data than the default range, show all data
+    if total_days <= default_range_days:
+        return None, None
+    
+    # Otherwise, show the last N days
+    start_date = latest_date - timedelta(days=default_range_days)
+    return start_date, latest_date
+
 # Utilities
 def get_confidence_multiplier(confidence_setting: str) -> float:
     """Get the confidence multiplier based on the setting"""
@@ -263,6 +288,8 @@ if 'confidence_interval' not in st.session_state:
     st.session_state.confidence_interval = "1σ"  # Default to 1σ
 if 'residuals_bins' not in st.session_state:
     st.session_state.residuals_bins = 15  # Default number of bins for residuals histogram
+if 'default_plot_range_days' not in st.session_state:
+    st.session_state.default_plot_range_days = 60  # Default plot range in days
 
 
 def load_data_files():
@@ -365,6 +392,7 @@ def load_data_files():
             st.session_state.enable_forecast = bool(prefs.get("enable_forecast", st.session_state.enable_forecast))
             st.session_state.forecast_days = int(prefs.get("forecast_days", st.session_state.forecast_days))
             st.session_state.residuals_bins = int(prefs.get("residuals_bins", st.session_state.residuals_bins))
+            st.session_state.default_plot_range_days = int(prefs.get("default_plot_range_days", st.session_state.default_plot_range_days))
         else:
             # Persist defaults for first-time users
             set_preferences_for_user(
@@ -373,6 +401,7 @@ def load_data_files():
                 bool(st.session_state.enable_forecast),
                 int(st.session_state.forecast_days),
                 int(st.session_state.residuals_bins),
+                int(st.session_state.default_plot_range_days),
             )
     except Exception:
         pass
@@ -656,13 +685,19 @@ def show_dashboard():
             # in some Plotly versions. The forecast joins smoothly from the last
             # historical point, so the separation is visually clear without a marker.
             
+            # Set default plot range based on user preference
+            start_date, end_date = get_default_plot_range(entries)
+            layout_config = get_mobile_friendly_layout_config()
+            if start_date is not None and end_date is not None:
+                layout_config['xaxis'] = {'range': [start_date, end_date]}
+            
             fig.update_layout(
                 title="Weight Trend Analysis" + (f" + {forecast_days}-Day Forecast" if st.session_state.enable_forecast else ""),
                 xaxis_title="Date",
                 yaxis_title="Weight (lbs)",
                 hovermode='x unified',
                 height=500,
-                **get_mobile_friendly_layout_config()
+                **layout_config
             )
             
             st.plotly_chart(fig, width='stretch')
@@ -1049,19 +1084,17 @@ def show_weight_tracking():
                     ))
                 
                 
+                # Set default plot range based on user preference
+                start_date, end_date = get_default_plot_range(st.session_state.weights_data)
+                layout_config = get_mobile_friendly_layout_config()
+                if start_date is not None and end_date is not None:
+                    layout_config['xaxis'] = {'range': [start_date, end_date]}
+                
                 fig.update_layout(
                     title="Weight Trend Analysis",
                     height=500,
                     hovermode='x unified',
-                    legend=dict(
-                        orientation="h",
-                        yanchor="top",
-                        y=-0.15,
-                        xanchor="center",
-                        x=0.5,
-                        font=dict(size=10)
-                    ),
-                    margin=dict(b=80)  # Add bottom margin for legend
+                    **layout_config
                 )
                 
                 fig.update_xaxes(title_text="Date")
@@ -1143,12 +1176,18 @@ def show_weight_tracking():
                 # Add zero line for velocity
                 velocity_fig.add_hline(y=0, line_dash="dash", line_color="gray")
                 
+                # Set default plot range based on user preference
+                start_date, end_date = get_default_plot_range(st.session_state.weights_data)
+                layout_config = get_velocity_mobile_layout_config()
+                if start_date is not None and end_date is not None:
+                    layout_config['xaxis'] = {'range': [start_date, end_date]}
+                layout_config['yaxis'] = {'range': [-3, 3]}  # Set y-range to -3 to +3 lbs/week
+                
                 velocity_fig.update_layout(
                     title="Weight Change Velocity",
                     height=400,
                     hovermode='x unified',
-                    yaxis=dict(range=[-3, 3]),  # Set y-range to -3 to +3 lbs/week
-                    **get_velocity_mobile_layout_config()
+                    **layout_config
                 )
                 
                 velocity_fig.update_xaxes(title_text="Date")
@@ -1366,12 +1405,18 @@ def show_body_composition():
             fig.add_hline(y=30, line_dash="dash", line_color="orange", annotation_text="Overweight")
             fig.add_hline(y=35, line_dash="dash", line_color="red", annotation_text="Obese")
             
+            # Set default plot range based on user preference
+            start_date, end_date = get_default_plot_range(st.session_state.weights_data)
+            layout_config = get_mobile_friendly_layout_config()
+            if start_date is not None and end_date is not None:
+                layout_config['xaxis'] = {'range': [start_date, end_date]}
+            
             fig.update_layout(
                 title="BMI Trend Over Time",
                 xaxis_title="Date",
                 yaxis_title="BMI",
                 height=500,
-                **get_mobile_friendly_layout_config()
+                **layout_config
             )
             
             st.plotly_chart(fig, width='stretch')
@@ -1445,20 +1490,18 @@ def show_body_composition():
                         line=dict(color='purple', width=2)
                     ))
                     
+                    # Set default plot range based on user preference
+                    start_date, end_date = get_default_plot_range(st.session_state.weights_data)
+                    layout_config = get_mobile_friendly_layout_config()
+                    if start_date is not None and end_date is not None:
+                        layout_config['xaxis'] = {'range': [start_date, end_date]}
+                    
                     fig.update_layout(
                         title="Body Fat Percentage Trend (Smoothed)",
                         xaxis_title="Date",
                         yaxis_title="Body Fat %",
                         height=500,
-                        legend=dict(
-                            orientation="h",
-                            yanchor="top",
-                            y=-0.15,
-                            xanchor="center",
-                            x=0.5,
-                            font=dict(size=10)
-                        ),
-                        margin=dict(b=80)  # Add bottom margin for legend
+                        **layout_config
                     )
                     
                     st.plotly_chart(fig, width='stretch')
@@ -1503,20 +1546,18 @@ def show_body_composition():
                 ffmi_fig.add_hline(y=20, line_dash="dash", line_color="yellow", annotation_text="Above Average")
                 ffmi_fig.add_hline(y=22, line_dash="dash", line_color="green", annotation_text="Excellent")
                 
+                # Set default plot range based on user preference
+                start_date, end_date = get_default_plot_range(st.session_state.weights_data)
+                layout_config = get_mobile_friendly_layout_config()
+                if start_date is not None and end_date is not None:
+                    layout_config['xaxis'] = {'range': [start_date, end_date]}
+                
                 ffmi_fig.update_layout(
                     title="Fat-Free Mass Index (FFMI) Trend (Smoothed)",
                     xaxis_title="Date",
                     yaxis_title="FFMI",
                     height=500,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="top",
-                        y=-0.15,
-                        xanchor="center",
-                        x=0.5,
-                        font=dict(size=10)
-                    ),
-                    margin=dict(b=80)  # Add bottom margin for legend
+                    **layout_config
                 )
                 
                 st.plotly_chart(ffmi_fig, width='stretch')
@@ -1555,6 +1596,7 @@ def show_settings():
                         bool(st.session_state.enable_forecast),
                         int(st.session_state.forecast_days),
                         int(st.session_state.residuals_bins),
+                        int(st.session_state.default_plot_range_days),
                     )
             except Exception:
                 pass
@@ -1590,6 +1632,14 @@ def show_settings():
             help="Number of days to forecast into the future"
         )
         
+        default_plot_range_days = st.slider(
+            "Default Plot Range (days)",
+            min_value=7,
+            max_value=365,
+            value=st.session_state.default_plot_range_days,
+            help="Default time range shown on plots (you can still zoom out to see all data)"
+        )
+        
         # Update session state immediately when changed
         if enable_forecast != st.session_state.enable_forecast:
             st.session_state.enable_forecast = enable_forecast
@@ -1602,6 +1652,7 @@ def show_settings():
                         bool(st.session_state.enable_forecast),
                         int(st.session_state.forecast_days),
                         int(st.session_state.residuals_bins),
+                        int(st.session_state.default_plot_range_days),
                     )
             except Exception:
                 pass
@@ -1618,6 +1669,7 @@ def show_settings():
                         bool(st.session_state.enable_forecast),
                         int(st.session_state.forecast_days),
                         int(st.session_state.residuals_bins),
+                        int(st.session_state.default_plot_range_days),
                     )
             except Exception:
                 pass
@@ -1644,6 +1696,25 @@ def show_settings():
                         bool(st.session_state.enable_forecast),
                         int(st.session_state.forecast_days),
                         int(st.session_state.residuals_bins),
+                        int(st.session_state.default_plot_range_days),
+                    )
+            except Exception:
+                pass
+            st.rerun()
+        
+        # Update session state immediately when changed
+        if default_plot_range_days != st.session_state.default_plot_range_days:
+            st.session_state.default_plot_range_days = default_plot_range_days
+            try:
+                user_id = get_current_user()
+                if user_id:
+                    set_preferences_for_user(
+                        sanitize_user_id(user_id),
+                        st.session_state.confidence_interval,
+                        bool(st.session_state.enable_forecast),
+                        int(st.session_state.forecast_days),
+                        int(st.session_state.residuals_bins),
+                        int(st.session_state.default_plot_range_days),
                     )
             except Exception:
                 pass
