@@ -1906,11 +1906,13 @@ def show_data_management():
         weights_file = st.file_uploader(
             "Upload weights CSV",
             type=['csv'],
-            help="CSV should have 'date' and 'weight' columns"
+            help="CSV should have 'date' and 'weight' columns",
+            key="weights_file_uploader"
         )
         
         if weights_file is not None:
             try:
+                # Read once; if headers missing, fall back to header=None
                 df = pd.read_csv(weights_file)
                 if 'date' in df.columns and 'weight' in df.columns:
                     # Replace user's weights in DB
@@ -1922,9 +1924,33 @@ def show_data_management():
                     load_data_files()
                     # Set success message in session state
                     st.session_state.csv_success_message = f"Successfully uploaded {len(df)} weight entries"
+                    # Clear uploader to prevent repeated reruns/flicker
+                    st.session_state['weights_file_uploader'] = None
                     st.rerun()
                 else:
-                    st.error("CSV must have 'date' and 'weight' columns")
+                    # Try headerless CSV (first col date, second col weight)
+                    try:
+                        weights_file.seek(0)
+                        df_no_header = pd.read_csv(weights_file, header=None)
+                        if len(df_no_header.columns) >= 2:
+                            df_fixed = pd.DataFrame({
+                                'date': pd.to_datetime(df_no_header.iloc[:, 0], errors='coerce'),
+                                'weight': pd.to_numeric(df_no_header.iloc[:, 1], errors='coerce')
+                            }).dropna(subset=['date', 'weight'])
+                            if len(df_fixed) > 0:
+                                user_id = get_current_user()
+                                if user_id:
+                                    replace_weights_for_user(sanitize_user_id(user_id), df_fixed)
+                                load_data_files()
+                                st.session_state.csv_success_message = f"Successfully uploaded {len(df_fixed)} weight entries (auto-fixed format)"
+                                st.session_state['weights_file_uploader'] = None
+                                st.rerun()
+                            else:
+                                st.error("No valid rows found in weights CSV")
+                        else:
+                            st.error("Weights CSV must have at least 2 columns (date, weight)")
+                    except Exception as e2:
+                        st.error(f"Error reading weights CSV: {e2}")
             except Exception as e:
                 st.error(f"Error processing file: {e}")
     
@@ -1933,7 +1959,8 @@ def show_data_management():
         lbm_file = st.file_uploader(
             "Upload LBM CSV",
             type=['csv'],
-            help="CSV should have 'date' and 'lbm' columns"
+            help="CSV should have 'date' and 'lbm' columns",
+            key="lbm_file_uploader"
         )
         
         if lbm_file is not None:
@@ -1960,6 +1987,8 @@ def show_data_management():
                     load_data_files()
                     # Set success message in session state
                     st.session_state.csv_success_message = f"Successfully uploaded {len(df)} LBM entries"
+                    # Clear uploader to prevent repeated reruns/flicker
+                    st.session_state['lbm_file_uploader'] = None
                     st.rerun()
                 else:
                     # Try to handle files without proper headers
@@ -1967,6 +1996,7 @@ def show_data_management():
                     
                     # Try reading without headers (treat first row as data)
                     try:
+                        lbm_file.seek(0)
                         df_no_header = pd.read_csv(lbm_file, header=None)
                         if len(df_no_header.columns) >= 2:
                             # Assume first column is date, second is lbm
@@ -2003,6 +2033,8 @@ def show_data_management():
                             load_data_files()
                             # Set success message in session state
                             st.session_state.csv_success_message = f"Successfully uploaded {len(df_fixed)} LBM entries (auto-fixed format)"
+                            # Clear uploader to prevent repeated reruns/flicker
+                            st.session_state['lbm_file_uploader'] = None
                             st.rerun()
                         else:
                             st.error("Could not parse dates in the CSV file")
