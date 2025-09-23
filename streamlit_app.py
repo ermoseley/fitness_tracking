@@ -1925,7 +1925,8 @@ def show_data_management():
                     # Set success message in session state
                     st.session_state.csv_success_message = f"Successfully uploaded {len(df)} weight entries"
                     # Clear uploader to prevent repeated reruns/flicker
-                    st.session_state['weights_file_uploader'] = None
+                    if 'weights_file_uploader' in st.session_state:
+                        del st.session_state['weights_file_uploader']
                     st.rerun()
                 else:
                     # Try headerless CSV (first col date, second col weight)
@@ -1943,7 +1944,8 @@ def show_data_management():
                                     replace_weights_for_user(sanitize_user_id(user_id), df_fixed)
                                 load_data_files()
                                 st.session_state.csv_success_message = f"Successfully uploaded {len(df_fixed)} weight entries (auto-fixed format)"
-                                st.session_state['weights_file_uploader'] = None
+                                if 'weights_file_uploader' in st.session_state:
+                                    del st.session_state['weights_file_uploader']
                                 st.rerun()
                             else:
                                 st.error("No valid rows found in weights CSV")
@@ -1988,7 +1990,8 @@ def show_data_management():
                     # Set success message in session state
                     st.session_state.csv_success_message = f"Successfully uploaded {len(df)} LBM entries"
                     # Clear uploader to prevent repeated reruns/flicker
-                    st.session_state['lbm_file_uploader'] = None
+                    if 'lbm_file_uploader' in st.session_state:
+                        del st.session_state['lbm_file_uploader']
                     st.rerun()
                 else:
                     # Try to handle files without proper headers
@@ -2034,7 +2037,8 @@ def show_data_management():
                             # Set success message in session state
                             st.session_state.csv_success_message = f"Successfully uploaded {len(df_fixed)} LBM entries (auto-fixed format)"
                             # Clear uploader to prevent repeated reruns/flicker
-                            st.session_state['lbm_file_uploader'] = None
+                            if 'lbm_file_uploader' in st.session_state:
+                                del st.session_state['lbm_file_uploader']
                             st.rerun()
                         else:
                             st.error("Could not parse dates in the CSV file")
@@ -2286,12 +2290,8 @@ def show_data_management():
                 entry_datetime = datetime.combine(manual_lbm_date, manual_lbm_time)
                 user_id = get_current_user()
                 if user_id:
-                    # Create DataFrame for LBM entry
-                    lbm_df = pd.DataFrame({
-                        'date': [entry_datetime],
-                        'lbm': [manual_lbm_value]
-                    })
-                    insert_lbm_for_user(sanitize_user_id(user_id), lbm_df)
+                    # Insert LBM entry directly
+                    insert_lbm_for_user(sanitize_user_id(user_id), entry_datetime, float(manual_lbm_value))
                     load_data_files()
                     # Set success message in session state
                     st.session_state.manual_lbm_success_message = "✅ Entry Added"
