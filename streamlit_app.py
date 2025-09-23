@@ -114,28 +114,88 @@ def is_mobile_device():
         return True
 
 
-def get_default_plot_range(entries):
+def get_default_plot_range(entries, debug=False):
     """
-    Calculate the default plot range based on user preference and available data.
+    Calculate an intelligent default plot range based on data density and distribution.
     Returns (start_date, end_date) or (None, None) for full range.
+    
+    Args:
+        entries: List of weight entries
+        debug: If True, print debug information about the calculation
     """
     if not entries or len(entries) == 0:
+        if debug:
+            st.write("🔍 Debug: No entries provided")
         return None, None
     
-    # Get the user's preferred default range
-    default_range_days = float(st.session_state.get('default_plot_range_days', 60))
+    # Get the user's preferred default range as a maximum
+    max_range_days = float(st.session_state.get('default_plot_range_days', 60))
     
     # Calculate the total data range
     earliest_date = entries[0].entry_datetime
     latest_date = entries[-1].entry_datetime
     span_days = (latest_date - earliest_date).total_seconds() / 86400.0
     
-    # If we have less than the default range of data, show all data
-    if span_days < default_range_days:
+    if debug:
+        st.write(f"🔍 Debug: Data span = {span_days:.1f} days, {len(entries)} entries")
+        st.write(f"🔍 Debug: Date range = {earliest_date.strftime('%Y-%m-%d')} to {latest_date.strftime('%Y-%m-%d')}")
+    
+    # If we have very little data, show all data
+    if span_days < 30:  # Less than a month
+        if debug:
+            st.write("🔍 Debug: Showing all data (less than 30 days)")
         return None, None
     
-    # Otherwise, show the last N days
-    start_date = latest_date - timedelta(days=default_range_days)
+    # Calculate data density (entries per day on average)
+    data_density = len(entries) / span_days
+    
+    if debug:
+        st.write(f"🔍 Debug: Data density = {data_density:.3f} entries/day")
+    
+    # Intelligent range selection based on data patterns
+    if span_days <= 90:  # 3 months or less - show most/all data
+        # Show at least 80% of data, but not more than max_range_days
+        target_days = min(span_days * 0.8, max_range_days)
+        if debug:
+            st.write(f"🔍 Debug: Short span (≤90 days) - target = {target_days:.1f} days")
+    elif span_days <= 365:  # Up to a year
+        # Show recent data with good density
+        if data_density >= 0.8:  # High frequency data (daily or near-daily)
+            target_days = min(90, max_range_days)  # Last 3 months
+            if debug:
+                st.write(f"🔍 Debug: High frequency data (≥0.8/day) - target = {target_days:.1f} days")
+        else:  # Lower frequency data
+            target_days = min(180, max_range_days)  # Last 6 months
+            if debug:
+                st.write(f"🔍 Debug: Lower frequency data (<0.8/day) - target = {target_days:.1f} days")
+    else:  # More than a year
+        # Show recent data with appropriate range based on density
+        if data_density >= 0.8:  # High frequency data
+            target_days = min(120, max_range_days)  # Last 4 months
+            if debug:
+                st.write(f"🔍 Debug: Long span, high frequency (≥0.8/day) - target = {target_days:.1f} days")
+        elif data_density >= 0.3:  # Moderate frequency (few times per week)
+            target_days = min(180, max_range_days)  # Last 6 months
+            if debug:
+                st.write(f"🔍 Debug: Long span, moderate frequency (≥0.3/day) - target = {target_days:.1f} days")
+        else:  # Low frequency data (weekly or less)
+            target_days = min(365, max_range_days)  # Last year
+            if debug:
+                st.write(f"🔍 Debug: Long span, low frequency (<0.3/day) - target = {target_days:.1f} days")
+    
+    # Ensure we don't exceed the total span
+    target_days = min(target_days, span_days)
+    
+    # If the calculated range is very close to the full range, show all data
+    if target_days >= span_days * 0.9:
+        if debug:
+            st.write(f"🔍 Debug: Target range ({target_days:.1f} days) ≥ 90% of total span - showing all data")
+        return None, None
+    
+    # Otherwise, show the calculated range from the end
+    start_date = latest_date - timedelta(days=target_days)
+    if debug:
+        st.write(f"🔍 Debug: Showing range from {start_date.strftime('%Y-%m-%d')} to {latest_date.strftime('%Y-%m-%d')} ({target_days:.1f} days)")
     return start_date, latest_date
 
 # Utilities
@@ -686,7 +746,7 @@ def show_dashboard():
             # historical point, so the separation is visually clear without a marker.
             
             # Set default plot range based on user preference
-            start_date, end_date = get_default_plot_range(entries)
+            start_date, end_date = get_default_plot_range(entries, debug=st.session_state.get('debug_plot_range', False))
             layout_config = get_mobile_friendly_layout_config()
             if start_date is not None and end_date is not None:
                 layout_config['xaxis'] = {'range': [start_date, end_date]}
@@ -1087,7 +1147,7 @@ def show_weight_tracking():
                 
                 
                 # Set default plot range based on user preference
-                start_date, end_date = get_default_plot_range(st.session_state.weights_data)
+                start_date, end_date = get_default_plot_range(st.session_state.weights_data, debug=st.session_state.get('debug_plot_range', False))
                 layout_config = get_mobile_friendly_layout_config()
                 if start_date is not None and end_date is not None:
                     layout_config['xaxis'] = {'range': [start_date, end_date]}
@@ -1181,7 +1241,7 @@ def show_weight_tracking():
                 velocity_fig.add_hline(y=0, line_dash="dash", line_color="gray")
                 
                 # Set default plot range based on user preference
-                start_date, end_date = get_default_plot_range(st.session_state.weights_data)
+                start_date, end_date = get_default_plot_range(st.session_state.weights_data, debug=st.session_state.get('debug_plot_range', False))
                 layout_config = get_velocity_mobile_layout_config()
                 if start_date is not None and end_date is not None:
                     layout_config['xaxis'] = {'range': [start_date, end_date]}
@@ -1499,7 +1559,7 @@ def show_body_composition():
                     ))
                     
                     # Set default plot range based on user preference
-                    start_date, end_date = get_default_plot_range(st.session_state.weights_data)
+                    start_date, end_date = get_default_plot_range(st.session_state.weights_data, debug=st.session_state.get('debug_plot_range', False))
                     layout_config = get_mobile_friendly_layout_config()
                     if start_date is not None and end_date is not None:
                         layout_config['xaxis'] = {'range': [start_date, end_date]}
@@ -1557,7 +1617,7 @@ def show_body_composition():
                 ffmi_fig.add_hline(y=22, line_dash="dash", line_color="green", annotation_text="Excellent")
                 
                 # Set default plot range based on user preference
-                start_date, end_date = get_default_plot_range(st.session_state.weights_data)
+                start_date, end_date = get_default_plot_range(st.session_state.weights_data, debug=st.session_state.get('debug_plot_range', False))
                 layout_config = get_mobile_friendly_layout_config()
                 if start_date is not None and end_date is not None:
                     layout_config['xaxis'] = {'range': [start_date, end_date]}
@@ -1651,6 +1711,16 @@ def show_settings():
             value=st.session_state.default_plot_range_days,
             help="Default time range shown on plots (you can still zoom out to see all data)"
         )
+        
+        # Debug option for plot range calculation
+        debug_plot_range = st.checkbox(
+            "Debug Plot Range Calculation",
+            value=False,
+            help="Show debug information about how the default plot range is calculated"
+        )
+        
+        # Store debug state in session
+        st.session_state.debug_plot_range = debug_plot_range
         
         # Update session state immediately when changed
         if enable_forecast != st.session_state.enable_forecast:
