@@ -876,7 +876,7 @@ def show_add_entries():
                     
                     # Reload data
                     load_data_files()
-                    st.success(f"Weight entry added: {weight_value} lbs on {entry_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    st.success("✅ Entry Added")
                     st.rerun()
                 else:
                     st.error("Please enter a valid weight value")
@@ -903,7 +903,7 @@ def show_add_entries():
                     
                     # Reload data
                     load_data_files()
-                    st.success(f"LBM entry added: {lbm_value} lbs on {lbm_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    st.success("✅ Entry Added")
                     st.rerun()
                 else:
                     st.error("Please enter a valid LBM value")
@@ -941,7 +941,7 @@ def show_add_entries():
                                 
                                 # Reload data
                                 load_data_files()
-                                st.success(f"Body fat entry added: {bf_value}% (LBM: {lbm:.1f} lbs) on {bf_datetime.strftime('%Y-%m-%d %H:%M')}")
+                                st.success("✅ Entry Added")
                                 st.rerun()
                             else:
                                 st.error("Failed to get current weight estimate. Please add weight entries first.")
@@ -2186,7 +2186,7 @@ def show_data_management():
                 if user_id:
                     insert_weight_for_user(sanitize_user_id(user_id), entry_datetime, float(manual_weight_value))
                     load_data_files()
-                    st.success(f"Weight entry added: {manual_weight_value} lbs on {entry_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    st.success("✅ Entry Added")
                     st.rerun()
         
         # Manual LBM Entry
@@ -2212,7 +2212,7 @@ def show_data_management():
                     })
                     insert_lbm_for_user(sanitize_user_id(user_id), lbm_df)
                     load_data_files()
-                    st.success(f"LBM entry added: {manual_lbm_value} lbs on {entry_datetime.strftime('%Y-%m-%d %H:%M')}")
+                    st.success("✅ Entry Added")
                     st.rerun()
     
     with tab3:
