@@ -1732,6 +1732,12 @@ def show_settings():
             help="Default time range shown on plots. Set to 365 days to show all available data. You can still zoom out to see all data regardless of this setting."
         )
         
+        # Show dynamic indicator for all-time mode
+        if default_plot_range_days >= 365:
+            st.success("📅 **All-Time Mode**: Charts will show your complete data history")
+        else:
+            st.info(f"📊 **Limited Range**: Charts will show the last {int(default_plot_range_days)} days")
+        
         # Y-axis padding setting
         if 'yaxis_padding_factor' not in st.session_state:
             st.session_state.yaxis_padding_factor = 0.1
