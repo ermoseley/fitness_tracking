@@ -1853,7 +1853,7 @@ def create_residuals_histogram(residuals: List[float],
                 label=f'-{ci_multiplier:.1f}σ = {-ci_multiplier*std_residual:.3f}')
     
     # Create title with date range if provided
-    title = "Residuals Histogram (Kalman Filter vs Raw Data)"
+    title = "Residuals Histogram (Kalman Filter vs Raw Data) [lbs]"
     if start_date and end_date:
         title += f"\nDate Range: {start_date} to {end_date}"
     elif start_date:
