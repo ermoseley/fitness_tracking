@@ -1331,7 +1331,7 @@ def show_weight_tracking():
                         y=[y_min, y_max],
                         mode='lines',
                         line=dict(color='red', dash='dot'),
-                        name=f"+{ci_mult:.1f}σ = {ci_mult * std_residual:.3f}",
+                        name=f"±{ci_mult:.1f}σ = ±{ci_mult * std_residual:.3f}",
                         showlegend=True,
                         hoverinfo='skip'
                     ))
@@ -1342,7 +1342,7 @@ def show_weight_tracking():
                         mode='lines',
                         line=dict(color='red', dash='dot'),
                         name=f"-{ci_mult:.1f}σ = {-ci_mult * std_residual:.3f}",
-                        showlegend=True,
+                        showlegend=False,  # Hide from legend but keep line visible
                         hoverinfo='skip'
                     ))
                     
