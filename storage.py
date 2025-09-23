@@ -33,25 +33,41 @@ except Exception:  # pragma: no cover - not running in streamlit
 
 DB_FILENAME = "fitness_tracker.db"
 
-# Optional cloud database (Postgres) via DATABASE_URL env var or Streamlit secrets
+# Optional cloud database (Postgres) via DATABASE_URL
+# Precedence: environment variable overrides Streamlit secrets.
 _DATABASE_URL: Optional[str] = None
-if _st is not None:
+
+# 1) Environment variable takes precedence for local overrides
+_DATABASE_URL = os.environ.get("DATABASE_URL", None)
+
+# 2) Fall back to Streamlit secrets if env var not set
+if not _DATABASE_URL and _st is not None:
     try:
-        # Prefer secrets if available
         _DATABASE_URL = _st.secrets.get("DATABASE_URL", None)  # type: ignore[attr-defined]
     except Exception:
         _DATABASE_URL = None
-if not _DATABASE_URL:
-    _DATABASE_URL = os.environ.get("DATABASE_URL", None)
 
 _USE_SQLALCHEMY = False
 _engine = None
-if _DATABASE_URL:
+
+def _should_use_postgres(url: Optional[str]) -> bool:
+    if not url:
+        return False
+    return url.lower().startswith("postgres")
+
+if _should_use_postgres(_DATABASE_URL):
     try:
-        # Lazy import SQLAlchemy if a cloud URL is configured
-        from sqlalchemy import create_engine, text  # type: ignore
+        # Lazy import SQLAlchemy only for Postgres
+        from sqlalchemy import create_engine  # type: ignore
         _engine = create_engine(_DATABASE_URL, pool_pre_ping=True)
-        _USE_SQLALCHEMY = True
+        # Eagerly verify connectivity so we can gracefully fall back to SQLite
+        try:
+            with _engine.connect() as _conn:
+                pass
+            _USE_SQLALCHEMY = True
+        except Exception:
+            _engine = None
+            _USE_SQLALCHEMY = False
     except Exception:
         # Fallback to SQLite if SQLAlchemy or driver not available
         _engine = None
