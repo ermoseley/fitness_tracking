@@ -1079,11 +1079,11 @@ def show_weight_tracking():
                     # Generate forecast data using configurable duration
                     forecast_days = int(st.session_state.forecast_days)
                     latest_date = ensure_py_datetime(dense_datetimes[-1])
-                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(0, forecast_days + 1)]
+                    forecast_dates = [latest_date + timedelta(days=int(i)) for i in range(0, forecast_days)]
                     forecast_weights = []
                     forecast_uncertainties = []
                     
-                    for i in range(0, forecast_days + 1):
+                    for i in range(0, forecast_days):
                         weight, std = kf.forecast(float(i))
                         forecast_weights.append(weight)
                         forecast_uncertainties.append(std)
@@ -1113,23 +1113,37 @@ def show_weight_tracking():
                     marker=dict(size=8, color='blue', opacity=0.7)
                 ))
                 
-                # Add combined historical and forecast trend line
+                # Add dense smoothed estimate curve (historical portion)
                 fig.add_trace(go.Scatter(
-                    x=combined_dates,
-                    y=combined_means,
+                    x=dense_datetimes,
+                    y=dense_means,
                     mode='lines',
-                    name='Smoothed Trend + Forecast',
+                    name='Smoothed Trend',
                     line=dict(color='red', width=2)
                 ))
                 
-                # Add smooth confidence intervals (combined historical + forecast)
+                # Add forecast portion with dashed line and fading opacity
+                if st.session_state.enable_forecast:
+                    # Create opacity gradient for forecast (fade from 1.0 to 0.3)
+                    forecast_opacity = np.linspace(1.0, 0.3, len(forecast_weights))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=forecast_dates,
+                        y=forecast_weights,
+                        mode='lines',
+                        name='Forecast',
+                        line=dict(color='red', width=2, dash='dash'),
+                        opacity=0.7  # Overall opacity for the trace
+                    ))
+                
+                # Add smooth confidence intervals (historical portion)
                 ci_multiplier = get_confidence_multiplier(st.session_state.confidence_interval)
-                combined_upper_bound = [mean + ci_multiplier * std for mean, std in zip(combined_means, combined_stds)]
-                combined_lower_bound = [mean - ci_multiplier * std for mean, std in zip(combined_means, combined_stds)]
+                hist_upper_bound = [mean + ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
+                hist_lower_bound = [mean - ci_multiplier * std for mean, std in zip(dense_means, dense_stds)]
                 
                 fig.add_trace(go.Scatter(
-                    x=combined_dates,
-                    y=combined_upper_bound,
+                    x=dense_datetimes,
+                    y=hist_upper_bound,
                     mode='lines',
                     line=dict(width=0),
                     showlegend=False,
@@ -1137,8 +1151,8 @@ def show_weight_tracking():
                 ))
                 
                 fig.add_trace(go.Scatter(
-                    x=combined_dates,
-                    y=combined_lower_bound,
+                    x=dense_datetimes,
+                    y=hist_lower_bound,
                     mode='lines',
                     line=dict(width=0),
                     fill='tonexty',
@@ -1146,6 +1160,33 @@ def show_weight_tracking():
                     name=f'{st.session_state.confidence_interval} Confidence',
                     hoverinfo='skip'
                 ))
+                
+                # Add forecast confidence intervals with fading opacity
+                if st.session_state.enable_forecast:
+                    forecast_upper_bound = [mean + ci_multiplier * std for mean, std in zip(forecast_weights, forecast_uncertainties)]
+                    forecast_lower_bound = [mean - ci_multiplier * std for mean, std in zip(forecast_weights, forecast_uncertainties)]
+                    
+                    fig.add_trace(go.Scatter(
+                        x=forecast_dates,
+                        y=forecast_upper_bound,
+                        mode='lines',
+                        line=dict(width=0),
+                        showlegend=False,
+                        hoverinfo='skip',
+                        opacity=0.5
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=forecast_dates,
+                        y=forecast_lower_bound,
+                        mode='lines',
+                        line=dict(width=0),
+                        fill='tonexty',
+                        fillcolor='rgba(255,0,0,0.1)',
+                        name=f'Forecast {st.session_state.confidence_interval} CI',
+                        hoverinfo='skip',
+                        opacity=0.5
+                    ))
                 
                 
                 
@@ -1170,9 +1211,11 @@ def show_weight_tracking():
                     layout_config['yaxis'] = {'range': y_range}
                 
                 fig.update_layout(
-                    title="Weight Trend Analysis",
-                    height=500,
+                    title="Weight Trend Analysis" + (f" + {forecast_days}-Day Forecast" if st.session_state.enable_forecast else ""),
+                    xaxis_title="Date",
+                    yaxis_title="Weight (lbs)",
                     hovermode='x unified',
+                    height=500,
                     **layout_config
                 )
                 if start_date is not None and end_date is not None:
@@ -1184,9 +1227,6 @@ def show_weight_tracking():
                         fig.update_xaxes(range=[start_date, end_date])
                 if y_range:
                     fig.update_yaxes(range=y_range)
-                
-                fig.update_xaxes(title_text="Date")
-                fig.update_yaxes(title_text="Weight (lbs)")
                 
                 st.plotly_chart(fig, config={'displayModeBar': True, 'displaylogo': False})
                 
