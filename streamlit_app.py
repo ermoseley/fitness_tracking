@@ -130,8 +130,8 @@ def get_default_plot_range(entries):
     latest_date = entries[-1].entry_datetime
     span_days = (latest_date - earliest_date).total_seconds() / 86400.0
     
-    # Special case: if slider is at maximum (365 days), show all data regardless
-    if default_range_days >= 365:
+    # Special cases: 0 or 366+ means show all data
+    if default_range_days == 0 or default_range_days >= 366:
         return None, None
     
     # If we have less than the default range of data, show all data
@@ -1726,15 +1726,17 @@ def show_settings():
         
         default_plot_range_days = st.slider(
             "Default Plot Range (days)",
-            min_value=7,
-            max_value=365,
+            min_value=0,
+            max_value=366,
             value=st.session_state.default_plot_range_days,
-            help="Default time range shown on plots. Set to 365 days to show all available data. You can still zoom out to see all data regardless of this setting."
+            help="Default time range shown on plots. Set to 366 days for all-time view. You can still zoom out to see all data regardless of this setting."
         )
         
         # Show dynamic indicator for all-time mode
-        if default_plot_range_days >= 365:
+        if default_plot_range_days >= 366:
             st.success("📅 **All-Time Mode**: Charts will show your complete data history")
+        elif default_plot_range_days == 0:
+            st.warning("⚠️ **No Default Range**: Charts will show all data by default (same as all-time mode)")
         else:
             st.info(f"📊 **Limited Range**: Charts will show the last {int(default_plot_range_days)} days")
         
