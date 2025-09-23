@@ -144,7 +144,7 @@ def get_default_plot_range(entries):
     return start_date, latest_date
 
 
-def get_weight_yaxis_range(entries, start_date=None, end_date=None, padding_factor=None):
+def get_weight_yaxis_range(entries, start_date=None, end_date=None, padding_factor=None, forecast_data=None):
     """
     Calculate an appropriate Y-axis range for weight charts.
     Returns (y_min, y_max) or None if no range should be set.
@@ -154,23 +154,30 @@ def get_weight_yaxis_range(entries, start_date=None, end_date=None, padding_fact
         start_date: Optional start date to filter entries
         end_date: Optional end date to filter entries  
         padding_factor: Factor for padding above/below data (default 0.1 = 10%)
+        forecast_data: Optional tuple of (forecast_weights, forecast_uncertainties) to include in range
     """
-    if not entries:
+    if not entries and not forecast_data:
         return None
     
-    # Filter entries by date range if specified
-    filtered_entries = entries
-    if start_date or end_date:
-        if start_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_date]
-        if end_date:
-            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_date]
+    # Get historical weight values
+    weights = []
+    if entries:
+        # Filter entries by date range if specified
+        filtered_entries = entries
+        if start_date or end_date:
+            if start_date:
+                filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_date]
+            if end_date:
+                filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_date]
+        
+        if filtered_entries:
+            weights = [e.weight for e in filtered_entries]
     
-    if not filtered_entries:
-        return None
+    # Include forecast data if provided
+    if forecast_data:
+        forecast_weights, forecast_uncertainties = forecast_data
+        weights.extend(forecast_weights)
     
-    # Get weight values
-    weights = [e.weight for e in filtered_entries]
     if not weights:
         return None
     
@@ -749,8 +756,11 @@ def show_dashboard():
             elif start_date is not None and end_date is not None:
                 layout_config['xaxis'] = {'range': [start_date, end_date]}
             
-            # Set appropriate Y-axis range for weight data
-            y_range = get_weight_yaxis_range(entries, start_date, end_date)
+            # Set appropriate Y-axis range for weight data (including forecast if enabled)
+            forecast_data = None
+            if st.session_state.enable_forecast:
+                forecast_data = (forecast_weights, forecast_uncertainties)
+            y_range = get_weight_yaxis_range(entries, start_date, end_date, forecast_data=forecast_data)
             if y_range:
                 layout_config['yaxis'] = {'range': y_range}
             
@@ -1131,8 +1141,11 @@ def show_weight_tracking():
                 elif start_date is not None and end_date is not None:
                     layout_config['xaxis'] = {'range': [start_date, end_date]}
                 
-                # Set appropriate Y-axis range for weight data
-                y_range = get_weight_yaxis_range(st.session_state.weights_data, start_date, end_date)
+                # Set appropriate Y-axis range for weight data (including forecast if enabled)
+                forecast_data = None
+                if st.session_state.enable_forecast:
+                    forecast_data = (forecast_weights, forecast_uncertainties)
+                y_range = get_weight_yaxis_range(st.session_state.weights_data, start_date, end_date, forecast_data=forecast_data)
                 if y_range:
                     layout_config['yaxis'] = {'range': y_range}
                 
