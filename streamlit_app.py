@@ -2185,10 +2185,20 @@ def show_data_management():
                     
                     if deleted_count > 0:
                         load_data_files()
-                        st.success(f"Deleted {deleted_count} weight entries")
+                        st.session_state.delete_success_message = f"Deleted {deleted_count} weight entries"
                         st.rerun()
                     else:
-                        st.warning("No entries selected for deletion")
+                        st.session_state.delete_warning_message = "No entries selected for deletion"
+                        st.rerun()
+            
+            # Display delete success/warning messages
+            if hasattr(st.session_state, 'delete_success_message') and st.session_state.delete_success_message:
+                st.success(st.session_state.delete_success_message)
+                del st.session_state.delete_success_message
+            
+            if hasattr(st.session_state, 'delete_warning_message') and st.session_state.delete_warning_message:
+                st.warning(st.session_state.delete_warning_message)
+                del st.session_state.delete_warning_message
         else:
             st.info("No weight data available")
         
