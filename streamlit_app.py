@@ -114,89 +114,76 @@ def is_mobile_device():
         return True
 
 
-def get_default_plot_range(entries, debug=False):
+def get_default_plot_range(entries):
     """
-    Calculate an intelligent default plot range based on data density and distribution.
+    Calculate the default plot range based on user preference and available data.
     Returns (start_date, end_date) or (None, None) for full range.
-    
-    Args:
-        entries: List of weight entries
-        debug: If True, print debug information about the calculation
     """
     if not entries or len(entries) == 0:
-        if debug:
-            st.write("🔍 Debug: No entries provided")
         return None, None
     
-    # Get the user's preferred default range as a maximum
-    max_range_days = float(st.session_state.get('default_plot_range_days', 60))
+    # Get the user's preferred default range
+    default_range_days = float(st.session_state.get('default_plot_range_days', 60))
     
     # Calculate the total data range
     earliest_date = entries[0].entry_datetime
     latest_date = entries[-1].entry_datetime
     span_days = (latest_date - earliest_date).total_seconds() / 86400.0
     
-    if debug:
-        st.write(f"🔍 Debug: Data span = {span_days:.1f} days, {len(entries)} entries")
-        st.write(f"🔍 Debug: Date range = {earliest_date.strftime('%Y-%m-%d')} to {latest_date.strftime('%Y-%m-%d')}")
-    
-    # If we have very little data, show all data
-    if span_days < 30:  # Less than a month
-        if debug:
-            st.write("🔍 Debug: Showing all data (less than 30 days)")
+    # If we have less than the default range of data, show all data
+    if span_days < default_range_days:
         return None, None
     
-    # Calculate data density (entries per day on average)
-    data_density = len(entries) / span_days
-    
-    if debug:
-        st.write(f"🔍 Debug: Data density = {data_density:.3f} entries/day")
-    
-    # Intelligent range selection based on data patterns
-    if span_days <= 90:  # 3 months or less - show most/all data
-        # Show at least 80% of data, but not more than max_range_days
-        target_days = min(span_days * 0.8, max_range_days)
-        if debug:
-            st.write(f"🔍 Debug: Short span (≤90 days) - target = {target_days:.1f} days")
-    elif span_days <= 365:  # Up to a year
-        # Show recent data with good density
-        if data_density >= 0.8:  # High frequency data (daily or near-daily)
-            target_days = min(90, max_range_days)  # Last 3 months
-            if debug:
-                st.write(f"🔍 Debug: High frequency data (≥0.8/day) - target = {target_days:.1f} days")
-        else:  # Lower frequency data
-            target_days = min(180, max_range_days)  # Last 6 months
-            if debug:
-                st.write(f"🔍 Debug: Lower frequency data (<0.8/day) - target = {target_days:.1f} days")
-    else:  # More than a year
-        # Show recent data with appropriate range based on density
-        if data_density >= 0.8:  # High frequency data
-            target_days = min(120, max_range_days)  # Last 4 months
-            if debug:
-                st.write(f"🔍 Debug: Long span, high frequency (≥0.8/day) - target = {target_days:.1f} days")
-        elif data_density >= 0.3:  # Moderate frequency (few times per week)
-            target_days = min(180, max_range_days)  # Last 6 months
-            if debug:
-                st.write(f"🔍 Debug: Long span, moderate frequency (≥0.3/day) - target = {target_days:.1f} days")
-        else:  # Low frequency data (weekly or less)
-            target_days = min(365, max_range_days)  # Last year
-            if debug:
-                st.write(f"🔍 Debug: Long span, low frequency (<0.3/day) - target = {target_days:.1f} days")
-    
-    # Ensure we don't exceed the total span
-    target_days = min(target_days, span_days)
-    
-    # If the calculated range is very close to the full range, show all data
-    if target_days >= span_days * 0.9:
-        if debug:
-            st.write(f"🔍 Debug: Target range ({target_days:.1f} days) ≥ 90% of total span - showing all data")
-        return None, None
-    
-    # Otherwise, show the calculated range from the end
-    start_date = latest_date - timedelta(days=target_days)
-    if debug:
-        st.write(f"🔍 Debug: Showing range from {start_date.strftime('%Y-%m-%d')} to {latest_date.strftime('%Y-%m-%d')} ({target_days:.1f} days)")
+    # Otherwise, show the last N days
+    start_date = latest_date - timedelta(days=default_range_days)
     return start_date, latest_date
+
+
+def get_weight_yaxis_range(entries, start_date=None, end_date=None, padding_factor=None):
+    """
+    Calculate an appropriate Y-axis range for weight charts.
+    Returns (y_min, y_max) or None if no range should be set.
+    
+    Args:
+        entries: List of weight entries
+        start_date: Optional start date to filter entries
+        end_date: Optional end date to filter entries  
+        padding_factor: Factor for padding above/below data (default 0.1 = 10%)
+    """
+    if not entries:
+        return None
+    
+    # Filter entries by date range if specified
+    filtered_entries = entries
+    if start_date or end_date:
+        if start_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime >= start_date]
+        if end_date:
+            filtered_entries = [e for e in filtered_entries if e.entry_datetime <= end_date]
+    
+    if not filtered_entries:
+        return None
+    
+    # Get weight values
+    weights = [e.weight for e in filtered_entries]
+    if not weights:
+        return None
+    
+    # Calculate range
+    min_weight = min(weights)
+    max_weight = max(weights)
+    weight_range = max_weight - min_weight
+    
+    # Use user's padding preference or default
+    if padding_factor is None:
+        padding_factor = st.session_state.get('yaxis_padding_factor', 0.1)
+    
+    # Add padding
+    padding = max(weight_range * padding_factor, 1.0)  # At least 1 lb padding
+    y_min = min_weight - padding
+    y_max = max_weight + padding
+    
+    return y_min, y_max
 
 # Utilities
 def get_confidence_multiplier(confidence_setting: str) -> float:
@@ -746,10 +733,15 @@ def show_dashboard():
             # historical point, so the separation is visually clear without a marker.
             
             # Set default plot range based on user preference
-            start_date, end_date = get_default_plot_range(entries, debug=st.session_state.get('debug_plot_range', False))
+            start_date, end_date = get_default_plot_range(entries)
             layout_config = get_mobile_friendly_layout_config()
             if start_date is not None and end_date is not None:
                 layout_config['xaxis'] = {'range': [start_date, end_date]}
+            
+            # Set appropriate Y-axis range for weight data
+            y_range = get_weight_yaxis_range(entries, start_date, end_date)
+            if y_range:
+                layout_config['yaxis'] = {'range': y_range}
             
             fig.update_layout(
                 title="Weight Trend Analysis" + (f" + {forecast_days}-Day Forecast" if st.session_state.enable_forecast else ""),
@@ -761,6 +753,8 @@ def show_dashboard():
             )
             if start_date is not None and end_date is not None:
                 fig.update_xaxes(range=[start_date, end_date])
+            if y_range:
+                fig.update_yaxes(range=y_range)
             
             st.plotly_chart(fig, width='stretch')
             
@@ -1147,10 +1141,15 @@ def show_weight_tracking():
                 
                 
                 # Set default plot range based on user preference
-                start_date, end_date = get_default_plot_range(st.session_state.weights_data, debug=st.session_state.get('debug_plot_range', False))
+                start_date, end_date = get_default_plot_range(st.session_state.weights_data)
                 layout_config = get_mobile_friendly_layout_config()
                 if start_date is not None and end_date is not None:
                     layout_config['xaxis'] = {'range': [start_date, end_date]}
+                
+                # Set appropriate Y-axis range for weight data
+                y_range = get_weight_yaxis_range(st.session_state.weights_data, start_date, end_date)
+                if y_range:
+                    layout_config['yaxis'] = {'range': y_range}
                 
                 fig.update_layout(
                     title="Weight Trend Analysis",
@@ -1160,6 +1159,8 @@ def show_weight_tracking():
                 )
                 if start_date is not None and end_date is not None:
                     fig.update_xaxes(range=[start_date, end_date])
+                if y_range:
+                    fig.update_yaxes(range=y_range)
                 
                 fig.update_xaxes(title_text="Date")
                 fig.update_yaxes(title_text="Weight (lbs)")
@@ -1241,7 +1242,7 @@ def show_weight_tracking():
                 velocity_fig.add_hline(y=0, line_dash="dash", line_color="gray")
                 
                 # Set default plot range based on user preference
-                start_date, end_date = get_default_plot_range(st.session_state.weights_data, debug=st.session_state.get('debug_plot_range', False))
+                start_date, end_date = get_default_plot_range(st.session_state.weights_data)
                 layout_config = get_velocity_mobile_layout_config()
                 if start_date is not None and end_date is not None:
                     layout_config['xaxis'] = {'range': [start_date, end_date]}
@@ -1559,7 +1560,7 @@ def show_body_composition():
                     ))
                     
                     # Set default plot range based on user preference
-                    start_date, end_date = get_default_plot_range(st.session_state.weights_data, debug=st.session_state.get('debug_plot_range', False))
+                    start_date, end_date = get_default_plot_range(st.session_state.weights_data)
                     layout_config = get_mobile_friendly_layout_config()
                     if start_date is not None and end_date is not None:
                         layout_config['xaxis'] = {'range': [start_date, end_date]}
@@ -1617,7 +1618,7 @@ def show_body_composition():
                 ffmi_fig.add_hline(y=22, line_dash="dash", line_color="green", annotation_text="Excellent")
                 
                 # Set default plot range based on user preference
-                start_date, end_date = get_default_plot_range(st.session_state.weights_data, debug=st.session_state.get('debug_plot_range', False))
+                start_date, end_date = get_default_plot_range(st.session_state.weights_data)
                 layout_config = get_mobile_friendly_layout_config()
                 if start_date is not None and end_date is not None:
                     layout_config['xaxis'] = {'range': [start_date, end_date]}
@@ -1712,15 +1713,18 @@ def show_settings():
             help="Default time range shown on plots (you can still zoom out to see all data)"
         )
         
-        # Debug option for plot range calculation
-        debug_plot_range = st.checkbox(
-            "Debug Plot Range Calculation",
-            value=False,
-            help="Show debug information about how the default plot range is calculated"
-        )
+        # Y-axis padding setting
+        if 'yaxis_padding_factor' not in st.session_state:
+            st.session_state.yaxis_padding_factor = 0.1
         
-        # Store debug state in session
-        st.session_state.debug_plot_range = debug_plot_range
+        yaxis_padding = st.slider(
+            "Y-axis Padding (%)",
+            min_value=5,
+            max_value=25,
+            value=int(st.session_state.yaxis_padding_factor * 100),
+            help="Extra space above and below weight data on charts (5% = tight fit, 25% = lots of space)"
+        )
+        st.session_state.yaxis_padding_factor = yaxis_padding / 100.0
         
         # Update session state immediately when changed
         if enable_forecast != st.session_state.enable_forecast:
