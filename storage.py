@@ -573,19 +573,31 @@ def migrate_lbm_csv_to_db(user_id: str, csv_df: pd.DataFrame) -> None:
 def delete_weight_entry(user_id: str, entry_datetime: datetime) -> bool:
     """Delete a specific weight entry by datetime. Returns True if deleted."""
     try:
-        with db_cursor() as conn:
+        with db_cursor() as handle:
             if _USE_SQLALCHEMY:
                 from sqlalchemy import text
+                conn = handle
                 result = conn.execute(
                     text("DELETE FROM weights WHERE user_id=:uid AND date=:dt;"),
                     {"uid": user_id, "dt": entry_datetime.isoformat()}
                 )
                 return result.rowcount > 0
             else:
-                cur = conn.cursor()
+                cur = handle
+                # Build robust date string candidates to handle historical formats
+                dt = entry_datetime
+                candidates = list({
+                    dt.isoformat(),  # e.g., 2025-09-17T08:38:42 or with microseconds
+                    dt.replace(microsecond=0).isoformat(),
+                    dt.strftime('%Y-%m-%d %H:%M:%S'),
+                    dt.strftime('%Y-%m-%d %H:%M:%S.%f').rstrip('0').rstrip('.'),
+                })
+
+                # Delete across candidates
+                placeholders = ",".join(["?"] * len(candidates))
                 cur.execute(
-                    "DELETE FROM weights WHERE user_id=? AND date=?;",
-                    (user_id, entry_datetime.isoformat())
+                    f"DELETE FROM weights WHERE user_id=? AND date IN ({placeholders});",
+                    (user_id, *candidates)
                 )
                 return cur.rowcount > 0
     except Exception:
@@ -595,16 +607,17 @@ def delete_weight_entry(user_id: str, entry_datetime: datetime) -> bool:
 def delete_lbm_entry(user_id: str, entry_datetime: datetime) -> bool:
     """Delete a specific LBM entry by datetime. Returns True if deleted."""
     try:
-        with db_cursor() as conn:
+        with db_cursor() as handle:
             if _USE_SQLALCHEMY:
                 from sqlalchemy import text
+                conn = handle
                 result = conn.execute(
                     text("DELETE FROM lbm WHERE user_id=:uid AND date=:dt;"),
                     {"uid": user_id, "dt": entry_datetime.isoformat()}
                 )
                 return result.rowcount > 0
             else:
-                cur = conn.cursor()
+                cur = handle
                 cur.execute(
                     "DELETE FROM lbm WHERE user_id=? AND date=?;",
                     (user_id, entry_datetime.isoformat())

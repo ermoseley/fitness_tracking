@@ -2090,7 +2090,7 @@ def show_data_management():
                     "Delete": st.column_config.CheckboxColumn("Delete", help="Check to delete this entry")
                 },
                 hide_index=True,
-                use_container_width=True,
+                width='stretch',
                 key="weights_editor"
             )
             
@@ -2140,7 +2140,7 @@ def show_data_management():
                     "Delete": st.column_config.CheckboxColumn("Delete", help="Check to delete this entry")
                 },
                 hide_index=True,
-                use_container_width=True,
+                width='stretch',
                 key="lbm_editor"
             )
             
