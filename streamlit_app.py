@@ -1890,6 +1890,12 @@ def show_data_management():
     """Data management page for uploading and managing CSV files"""
     st.header("📁 Data Management")
     
+    # Display CSV upload success message if it exists
+    if hasattr(st.session_state, 'csv_success_message') and st.session_state.csv_success_message:
+        st.success(st.session_state.csv_success_message)
+        # Clear the message after displaying
+        del st.session_state.csv_success_message
+    
     # File upload section
     st.subheader("📤 Upload Data Files")
     
@@ -1912,9 +1918,10 @@ def show_data_management():
                     if user_id:
                         replace_weights_for_user(sanitize_user_id(user_id), df)
                     
-                    # Reload data
+                    # Reload data first
                     load_data_files()
-                    st.success(f"Successfully uploaded {len(df)} weight entries")
+                    # Set success message in session state
+                    st.session_state.csv_success_message = f"Successfully uploaded {len(df)} weight entries"
                     st.rerun()
                 else:
                     st.error("CSV must have 'date' and 'weight' columns")
@@ -1949,9 +1956,10 @@ def show_data_management():
                     if user_id:
                         replace_lbm_for_user(sanitize_user_id(user_id), df)
                     
-                    # Reload data
+                    # Reload data first
                     load_data_files()
-                    st.success(f"Successfully uploaded {len(df)} LBM entries")
+                    # Set success message in session state
+                    st.session_state.csv_success_message = f"Successfully uploaded {len(df)} LBM entries"
                     st.rerun()
                 else:
                     # Try to handle files without proper headers
@@ -1991,9 +1999,10 @@ def show_data_management():
                             if user_id:
                                 replace_lbm_for_user(sanitize_user_id(user_id), df_fixed)
                             
-                            # Reload data
+                            # Reload data first
                             load_data_files()
-                            st.success(f"Successfully uploaded {len(df_fixed)} LBM entries (auto-fixed format)")
+                            # Set success message in session state
+                            st.session_state.csv_success_message = f"Successfully uploaded {len(df_fixed)} LBM entries (auto-fixed format)"
                             st.rerun()
                         else:
                             st.error("Could not parse dates in the CSV file")
