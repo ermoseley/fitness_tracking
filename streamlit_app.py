@@ -504,7 +504,7 @@ def show_dashboard():
             with col3:
                 calorie_deficit = latest_kalman.velocity * 3500
                 st.metric(
-                    "Calorie Deficit",
+                    "Calorie Surplus/Deficit",
                     f"{calorie_deficit:+.0f} cal/day"
                 )
                 st.caption("Estimated")
@@ -577,12 +577,12 @@ def show_dashboard():
                 marker=dict(size=8, color='blue', opacity=0.7)
             ))
             
-            # Add dense Kalman estimate curve (historical portion)
+            # Add dense smoothed estimate curve (historical portion)
             fig.add_trace(go.Scatter(
                 x=dense_datetimes,
                 y=dense_means,
                 mode='lines',
-                name='Kalman Estimate',
+                name='Smoothed Trend',
                 line=dict(color='red', width=2)
             ))
             
@@ -657,7 +657,7 @@ def show_dashboard():
             # historical point, so the separation is visually clear without a marker.
             
             fig.update_layout(
-                title="Weight Trend with Kalman Filter Analysis" + (f" + {forecast_days}-Day Forecast" if st.session_state.enable_forecast else ""),
+                title="Weight Trend Analysis" + (f" + {forecast_days}-Day Forecast" if st.session_state.enable_forecast else ""),
                 xaxis_title="Date",
                 yaxis_title="Weight (lbs)",
                 hovermode='x unified',
@@ -720,11 +720,11 @@ def show_dashboard():
             st.dataframe(df_recent, width='stretch')
             
         else:
-            st.error("Failed to run Kalman filter analysis")
+            st.error("Failed to run trend analysis")
             return
             
     except Exception as e:
-        st.error(f"Error running Kalman analysis: {e}")
+        st.error(f"Error running trend analysis: {e}")
         # Fallback to basic display
         st.metric("Latest Weight", f"{latest_entry.weight:.1f} lbs")
         st.metric("Total Entries", len(entries))
@@ -843,7 +843,7 @@ def show_weight_tracking():
     
     # Display current data
     if st.session_state.weights_data:
-        st.subheader("📊 Weight Analysis (Kalman Filter)")
+        st.subheader("📊 Weight Analysis")
         
         # Kalman filter analysis (primary method)
         try:
@@ -859,7 +859,7 @@ def show_weight_tracking():
                 
                 with col1:
                     st.metric(
-                        "Kalman Weight Estimate",
+                        "Smoothed Weight Estimate",
                         f"{latest_kalman.weight:.2f} lbs"
                     )
                     st.caption(f"±{ci_mult * latest_kalman.weight_var**0.5:.2f}")
@@ -875,7 +875,7 @@ def show_weight_tracking():
                 with col3:
                     calorie_deficit = latest_kalman.velocity * 3500
                     st.metric(
-                        "Calorie Deficit",
+                        "Calorie Surplus/Deficit",
                         f"{calorie_deficit:+.0f} cal/day"
                     )
                     st.caption("Estimated")
@@ -917,8 +917,8 @@ def show_weight_tracking():
                         )
                         st.caption(f"±{ci_mult * forecast_std:.2f}")
                 
-                # Kalman plot
-                st.subheader("🔬 Kalman Filter Analysis")
+                # Smoothed trend analysis
+                st.subheader("🔬 Trend Analysis")
                 
                 # Create dense, smooth curves using the same approach as the original
                 from kalman import compute_kalman_mean_std_spline
@@ -976,12 +976,12 @@ def show_weight_tracking():
                     marker=dict(size=8, color='blue', opacity=0.7)
                 ))
                 
-                # Add dense Kalman estimate curve (historical portion)
+                # Add dense smoothed estimate curve (historical portion)
                 fig.add_trace(go.Scatter(
                     x=dense_datetimes,
                     y=dense_means,
                     mode='lines',
-                    name='Kalman Estimate',
+                    name='Smoothed Trend',
                     line=dict(color='red', width=2)
                 ))
                 
@@ -1050,7 +1050,7 @@ def show_weight_tracking():
                 
                 
                 fig.update_layout(
-                    title="Kalman Filter Analysis: Weight Trend",
+                    title="Weight Trend Analysis",
                     height=500,
                     hovermode='x unified',
                     legend=dict(
@@ -1158,7 +1158,7 @@ def show_weight_tracking():
                 
                 # Residuals analysis
                 st.subheader("📊 Residuals Analysis")
-                st.write("Analysis of differences between raw weight measurements and Kalman filter estimates")
+                st.write("Analysis of differences between raw weight measurements and smoothed trend estimates")
                 
                 # Compute residuals
                 from kalman import compute_residuals
@@ -1239,8 +1239,8 @@ def show_weight_tracking():
                     ))
                     
                     fig_hist.update_layout(
-                        title="Residuals Histogram (Kalman Filter vs Raw Data)",
-                        xaxis_title="Residual (Raw Weight - Kalman Weight) [lbs]",
+                        title="Residuals Histogram (Smoothed vs Raw Data)",
+                        xaxis_title="Residual (Raw Weight - Smoothed Weight) [lbs]",
                         yaxis_title="Density",
                         height=500,
                         showlegend=True,
@@ -1280,7 +1280,7 @@ def show_weight_tracking():
                     st.warning("No residuals data available for analysis")
         
         except Exception as e:
-            st.error(f"Error running Kalman analysis: {e}")
+            st.error(f"Error running trend analysis: {e}")
     
     else:
         st.info("No weight data available. Please add some entries above.")
@@ -1441,12 +1441,12 @@ def show_body_composition():
                         x=dense_datetimes,
                         y=bf_percentages,
                         mode='lines',
-                        name='Body Fat % (Kalman)',
+                        name='Body Fat % (Smoothed)',
                         line=dict(color='purple', width=2)
                     ))
                     
                     fig.update_layout(
-                        title="Body Fat Percentage Trend (Kalman Filtered)",
+                        title="Body Fat Percentage Trend (Smoothed)",
                         xaxis_title="Date",
                         yaxis_title="Body Fat %",
                         height=500,
@@ -1493,7 +1493,7 @@ def show_body_composition():
                     x=dense_datetimes,
                     y=ffmi_values,
                     mode='lines',
-                    name='FFMI (Kalman)',
+                    name='FFMI (Smoothed)',
                     line=dict(color='green', width=2)
                 ))
                 
@@ -1504,7 +1504,7 @@ def show_body_composition():
                 ffmi_fig.add_hline(y=22, line_dash="dash", line_color="green", annotation_text="Excellent")
                 
                 ffmi_fig.update_layout(
-                    title="Fat-Free Mass Index (FFMI) Trend (Kalman Filtered)",
+                    title="Fat-Free Mass Index (FFMI) Trend (Smoothed)",
                     xaxis_title="Date",
                     yaxis_title="FFMI",
                     height=500,
