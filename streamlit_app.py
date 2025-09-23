@@ -781,7 +781,7 @@ def show_dashboard():
             if y_range:
                 fig.update_yaxes(range=y_range)
             
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, config={'displayModeBar': True, 'displaylogo': False})
             
             # Forecast summary metrics (only if enabled)
             if st.session_state.enable_forecast:
@@ -1188,7 +1188,7 @@ def show_weight_tracking():
                 fig.update_xaxes(title_text="Date")
                 fig.update_yaxes(title_text="Weight (lbs)")
                 
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, config={'displayModeBar': True, 'displaylogo': False})
                 
                 # Velocity plot with dense sampling
                 st.subheader("📈 Velocity Analysis")
@@ -1283,7 +1283,7 @@ def show_weight_tracking():
                 velocity_fig.update_xaxes(title_text="Date")
                 velocity_fig.update_yaxes(title_text="Velocity (lbs/week)")
                 
-                st.plotly_chart(velocity_fig, width='stretch')
+                st.plotly_chart(velocity_fig, config={'displayModeBar': True, 'displaylogo': False})
                 
                 # Residuals analysis
                 st.subheader("📊 Residuals Analysis")
@@ -1376,7 +1376,7 @@ def show_weight_tracking():
                         **get_residuals_mobile_layout_config()
                     )
                     
-                    st.plotly_chart(fig_hist, width='stretch')
+                    st.plotly_chart(fig_hist, config={'displayModeBar': True, 'displaylogo': False})
                     
                     # Statistics summary
                     col1, col2, col3 = st.columns(3)
@@ -1511,7 +1511,7 @@ def show_body_composition():
             if start_date is not None and end_date is not None:
                 fig.update_xaxes(range=[start_date, end_date])
             
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, config={'displayModeBar': True, 'displaylogo': False})
     
     except Exception as e:
         st.error(f"Error calculating BMI: {e}")
@@ -1613,7 +1613,7 @@ def show_body_composition():
                     if start_date is not None and end_date is not None:
                         fig.update_xaxes(range=[start_date, end_date])
                     
-                    st.plotly_chart(fig, width='stretch')
+                    st.plotly_chart(fig, config={'displayModeBar': True, 'displaylogo': False})
                 
                 # FFMI Analysis
                 st.subheader("💪 FFMI Analysis")
@@ -1671,7 +1671,7 @@ def show_body_composition():
                 if start_date is not None and end_date is not None:
                     ffmi_fig.update_xaxes(range=[start_date, end_date])
                 
-                st.plotly_chart(ffmi_fig, width='stretch')
+                st.plotly_chart(ffmi_fig, config={'displayModeBar': True, 'displaylogo': False})
         
         except Exception as e:
             st.error(f"Error calculating body fat: {e}")
