@@ -50,7 +50,7 @@ def get_mobile_friendly_legend_config():
     return dict(
         orientation="h",
         yanchor="top",
-        y=-0.15,
+        y=-0.25,  # Moved lower to avoid x-axis label overlap
         xanchor="center",
         x=0.5,
         font=dict(size=10)
@@ -63,36 +63,37 @@ def get_mobile_friendly_layout_config():
     """
     return dict(
         legend=get_mobile_friendly_legend_config(),
-        margin=dict(b=80)  # Bottom margin for legend space
+        margin=dict(b=100)  # Increased bottom margin for legend space
     )
 
 
 def get_velocity_mobile_layout_config():
     """
-    Returns layout configuration for velocity plots with slightly lower legend positioning.
+    Returns layout configuration for velocity plots with lower legend positioning.
     """
     return dict(
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.20,  # Lower than default for velocity plots
+            y=-0.30,  # Lower than default for velocity plots
             xanchor="center",
             x=0.5,
             font=dict(size=10)
         ),
-        margin=dict(b=90)  # Extra bottom margin for velocity plots
+        margin=dict(b=110)  # Extra bottom margin for velocity plots
     )
 
 
 def get_residuals_mobile_layout_config():
     """
     Returns layout configuration for residuals plots with extra space for legend.
+    Keeps original positioning as requested.
     """
     return dict(
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.15,
+            y=-0.15,  # Keep original positioning for residuals plot
             xanchor="center",
             x=0.5,
             font=dict(size=10)
