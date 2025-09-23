@@ -1999,8 +1999,6 @@ def show_data_management():
                             st.error("Could not parse dates in the CSV file")
                     else:
                         st.error("Could not parse LBM values in the CSV file")
-                else:
-                    st.error("CSV must have at least 2 columns (date and lbm)")
             except Exception as e:
                 st.error(f"Error processing file: {e}")
                 st.info("Please ensure your CSV has 'date' and 'lbm' columns, or at least 2 columns with date in first column and LBM values in second column.")
