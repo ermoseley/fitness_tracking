@@ -740,7 +740,13 @@ def show_dashboard():
             # Set default plot range based on user preference
             start_date, end_date = get_default_plot_range(entries)
             layout_config = get_mobile_friendly_layout_config()
-            if start_date is not None and end_date is not None:
+            
+            # For weight plots with forecast, extend x-axis range to include full forecast
+            if st.session_state.enable_forecast and start_date is not None and end_date is not None:
+                # Extend end_date to include forecast period
+                extended_end_date = end_date + timedelta(days=int(st.session_state.forecast_days))
+                layout_config['xaxis'] = {'range': [start_date, extended_end_date]}
+            elif start_date is not None and end_date is not None:
                 layout_config['xaxis'] = {'range': [start_date, end_date]}
             
             # Set appropriate Y-axis range for weight data
@@ -757,7 +763,12 @@ def show_dashboard():
                 **layout_config
             )
             if start_date is not None and end_date is not None:
-                fig.update_xaxes(range=[start_date, end_date])
+                if st.session_state.enable_forecast:
+                    # Extend x-axis range to include forecast
+                    extended_end_date = end_date + timedelta(days=int(st.session_state.forecast_days))
+                    fig.update_xaxes(range=[start_date, extended_end_date])
+                else:
+                    fig.update_xaxes(range=[start_date, end_date])
             if y_range:
                 fig.update_yaxes(range=y_range)
             
@@ -1148,7 +1159,13 @@ def show_weight_tracking():
                 # Set default plot range based on user preference
                 start_date, end_date = get_default_plot_range(st.session_state.weights_data)
                 layout_config = get_mobile_friendly_layout_config()
-                if start_date is not None and end_date is not None:
+                
+                # For weight plots with forecast, extend x-axis range to include full forecast
+                if st.session_state.enable_forecast and start_date is not None and end_date is not None:
+                    # Extend end_date to include forecast period
+                    extended_end_date = end_date + timedelta(days=int(st.session_state.forecast_days))
+                    layout_config['xaxis'] = {'range': [start_date, extended_end_date]}
+                elif start_date is not None and end_date is not None:
                     layout_config['xaxis'] = {'range': [start_date, end_date]}
                 
                 # Set appropriate Y-axis range for weight data
@@ -1163,7 +1180,12 @@ def show_weight_tracking():
                     **layout_config
                 )
                 if start_date is not None and end_date is not None:
-                    fig.update_xaxes(range=[start_date, end_date])
+                    if st.session_state.enable_forecast:
+                        # Extend x-axis range to include forecast
+                        extended_end_date = end_date + timedelta(days=int(st.session_state.forecast_days))
+                        fig.update_xaxes(range=[start_date, extended_end_date])
+                    else:
+                        fig.update_xaxes(range=[start_date, end_date])
                 if y_range:
                     fig.update_yaxes(range=y_range)
                 
