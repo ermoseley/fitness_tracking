@@ -283,7 +283,15 @@ def get_current_user() -> Optional[str]:
     if not session_id:
         return None
     
-    return validate_session(session_id)
+    user_id = validate_session(session_id)
+    
+    # If session is invalid/expired, clean up session state
+    if user_id is None and "auth_session_id" in _st.session_state:
+        del _st.session_state.auth_session_id
+        if "user_id" in _st.session_state:
+            del _st.session_state.user_id
+    
+    return user_id
 
 def require_auth():
     """Decorator/function to require authentication. Call this at the start of your app."""

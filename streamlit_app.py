@@ -239,8 +239,9 @@ def get_user_data_dir() -> str:
     """Return the data directory path for the current user."""
     user_id = st.session_state.get("user_id")
     if not user_id:
-        user_id = f"guest-{uuid.uuid4().hex[:8]}"
-        st.session_state.user_id = user_id
+        # This should not happen if authentication is working properly
+        st.error("No authenticated user found. Please refresh and log in again.")
+        return "data/users/guest"
     safe_user = sanitize_user_id(user_id)
     return os.path.join("data", "users", safe_user)
 
@@ -327,11 +328,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
+# Initialize session state (only basic flags, user-specific data will be loaded after auth)
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
-if 'user_id' not in st.session_state:
-    st.session_state.user_id = f"guest-{uuid.uuid4().hex[:8]}"
 if 'weights_data' not in st.session_state:
     st.session_state.weights_data = []
 if 'lbm_data' not in st.session_state:
@@ -479,6 +478,10 @@ def main():
     # Initialize database and authentication on startup
     init_database()
     init_auth_tables()
+    
+    # Clean up expired sessions periodically
+    from auth import cleanup_expired_sessions
+    cleanup_expired_sessions()
     
     # Check authentication - if not authenticated, show login form and return
     if not require_auth():
