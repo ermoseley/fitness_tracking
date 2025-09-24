@@ -2231,8 +2231,26 @@ def show_data_management():
                     for idx, row in edited_weights_df.iterrows():
                         if row['Delete']:
                             entry = st.session_state.weights_data[row['Index']]
-                            if delete_weight_entry(sanitize_user_id(user_id), entry.entry_datetime):
+                            sanitized_user = sanitize_user_id(user_id)
+                            print(f"DEBUG: Attempting to delete weight entry:")
+                            print(f"  Original user_id: {user_id}")
+                            print(f"  Sanitized user_id: {sanitized_user}")
+                            print(f"  Entry datetime: {entry.entry_datetime}")
+                            print(f"  Entry datetime type: {type(entry.entry_datetime)}")
+                            print(f"  Entry datetime ISO: {entry.entry_datetime.isoformat()}")
+                            
+                            # Check if entry exists in database before deletion
+                            from storage import get_weights_for_user
+                            existing_weights = get_weights_for_user(sanitized_user)
+                            print(f"  Existing weights in DB: {len(existing_weights)}")
+                            for i, (dt, w) in enumerate(existing_weights[:3]):
+                                print(f"    {i}: {dt} (type: {type(dt)})")
+                            
+                            if delete_weight_entry(sanitized_user, entry.entry_datetime):
                                 deleted_count += 1
+                                print(f"DEBUG: Successfully deleted weight entry")
+                            else:
+                                print(f"DEBUG: Failed to delete weight entry")
                     
                     if deleted_count > 0:
                         load_data_files()
@@ -2292,8 +2310,12 @@ def show_data_management():
                         if row['Delete']:
                             lbm_row = st.session_state.lbm_data.iloc[row['Index']]
                             entry_datetime = pd.to_datetime(lbm_row['date'])
+                            print(f"DEBUG: Attempting to delete LBM entry: user={sanitize_user_id(user_id)}, datetime={entry_datetime}")
                             if delete_lbm_entry(sanitize_user_id(user_id), entry_datetime):
                                 deleted_count += 1
+                                print(f"DEBUG: Successfully deleted LBM entry")
+                            else:
+                                print(f"DEBUG: Failed to delete LBM entry")
                     
                     if deleted_count > 0:
                         load_data_files()

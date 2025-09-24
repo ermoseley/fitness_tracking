@@ -581,7 +581,9 @@ def delete_weight_entry(user_id: str, entry_datetime: datetime) -> bool:
                     text("DELETE FROM weights WHERE user_id=:uid AND date=:dt;"),
                     {"uid": user_id, "dt": entry_datetime.isoformat()}
                 )
-                return result.rowcount > 0
+                deleted_count = result.rowcount
+                print(f"DEBUG: Deleted {deleted_count} weight entries for user {user_id} at {entry_datetime.isoformat()}")
+                return deleted_count > 0
             else:
                 cur = handle
                 # Build robust date string candidates to handle historical formats
@@ -599,8 +601,11 @@ def delete_weight_entry(user_id: str, entry_datetime: datetime) -> bool:
                     f"DELETE FROM weights WHERE user_id=? AND date IN ({placeholders});",
                     (user_id, *candidates)
                 )
-                return cur.rowcount > 0
-    except Exception:
+                deleted_count = cur.rowcount
+                print(f"DEBUG: Deleted {deleted_count} weight entries for user {user_id} at {entry_datetime.isoformat()}")
+                return deleted_count > 0
+    except Exception as e:
+        print(f"DEBUG: Error deleting weight entry: {e}")
         return False
 
 
@@ -615,15 +620,20 @@ def delete_lbm_entry(user_id: str, entry_datetime: datetime) -> bool:
                     text("DELETE FROM lbm WHERE user_id=:uid AND date=:dt;"),
                     {"uid": user_id, "dt": entry_datetime.isoformat()}
                 )
-                return result.rowcount > 0
+                deleted_count = result.rowcount
+                print(f"DEBUG: Deleted {deleted_count} LBM entries for user {user_id} at {entry_datetime.isoformat()}")
+                return deleted_count > 0
             else:
                 cur = handle
                 cur.execute(
                     "DELETE FROM lbm WHERE user_id=? AND date=?;",
                     (user_id, entry_datetime.isoformat())
                 )
-                return cur.rowcount > 0
-    except Exception:
+                deleted_count = cur.rowcount
+                print(f"DEBUG: Deleted {deleted_count} LBM entries for user {user_id} at {entry_datetime.isoformat()}")
+                return deleted_count > 0
+    except Exception as e:
+        print(f"DEBUG: Error deleting LBM entry: {e}")
         return False
 
 
