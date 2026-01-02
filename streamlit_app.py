@@ -1573,35 +1573,42 @@ def show_body_composition():
                 dense_datetimes, dense_means, dense_stds = compute_kalman_mean_std_spline(kalman_states, kalman_dates)
                 
                 # Process LBM data
-                lbm_dates = pd.to_datetime(st.session_state.lbm_data['date'], format='ISO8601')
-                lbm_values = st.session_state.lbm_data['lbm'].values
-                
-                # Interpolate LBM to dense Kalman dates
-                from scipy.interpolate import interp1d
-                
-                # Convert LBM dates to seconds from first date
-                lbm_times = (lbm_dates - lbm_dates[0]).dt.total_seconds().values
-                
-                # Create interpolation function that holds last value constant beyond data range
-                lbm_interp = interp1d(
-                    lbm_times,
-                    lbm_values,
-                    kind='linear',
-                    bounds_error=False,
-                    fill_value=(lbm_values[0], lbm_values[-1])  # Hold first/last values constant
-                )
+                # NOTE: We must interpolate LBM and weights on the *same* time axis.
+                # The previous code used "seconds since first LBM date" for LBM but
+                # "seconds since first weight date" for target dates, which can shift
+                # the LBM curve and inflate/deflate BF% / FFMI.
+                lbm_df = st.session_state.lbm_data[['date', 'lbm']].copy()
+                lbm_df['date'] = pd.to_datetime(lbm_df['date'], errors='coerce')
+                lbm_df['lbm'] = pd.to_numeric(lbm_df['lbm'], errors='coerce')
+                lbm_df = lbm_df.dropna(subset=['date', 'lbm']).sort_values('date')
+
+                # Collapse duplicate timestamps by averaging (np.interp requires increasing x)
+                lbm_df = lbm_df.groupby('date', as_index=False)['lbm'].mean()
+                lbm_dates = lbm_df['date']
+                lbm_values = lbm_df['lbm'].to_numpy(dtype=float)
+
+                if len(lbm_values) == 0:
+                    st.info("No valid LBM data available. Upload a CSV file with 'date' and 'lbm' columns to see body fat analysis.")
+                    return
+
+                # Interpolate onto dense Kalman datetimes using absolute timestamps (seconds since epoch).
+                # Hold first/last values constant outside the measured range.
+                lbm_x = (lbm_dates.view('int64') / 1e9).to_numpy(dtype=float)  # seconds
+                dense_ts = pd.to_datetime(dense_datetimes, errors='coerce')
+                dense_x = (dense_ts.view('int64') / 1e9).to_numpy(dtype=float)
+                lbm_interp_values = np.interp(dense_x, lbm_x, lbm_values, left=float(lbm_values[0]), right=float(lbm_values[-1]))
                 
                 # Calculate body fat percentages for dense Kalman data
                 bf_percentages = []
                 lbm_interpolated = []
                 last_lbm_date = lbm_dates.iloc[-1]
                 
-                for i, (dt, weight) in enumerate(zip(dense_datetimes, dense_means)):
-                    time_diff = (dt - dense_datetimes[0]).total_seconds()
-                    lbm = lbm_interp(time_diff)
+                for dt, weight, lbm in zip(dense_datetimes, dense_means, lbm_interp_values):
+                    lbm = float(lbm)
                     lbm_interpolated.append(lbm)
-                    bf_percent = ((weight - lbm) / weight) * 100
-                    bf_percentages.append(bf_percent)
+                    w = float(weight)
+                    bf_percent = 0.0 if w <= 0 else ((w - lbm) / w) * 100.0
+                    bf_percentages.append(float(bf_percent))
                 
                 if bf_percentages:
                     # Display current body fat
@@ -1610,8 +1617,8 @@ def show_body_composition():
                     bf_category = get_bf_category(current_bf, 'male')  # Assuming male for now
                     
                     # Check if current LBM is being held constant (beyond last measurement)
-                    current_date = dense_datetimes[-1]
-                    is_lbm_held_constant = current_date > last_lbm_date
+                    current_date = ensure_py_datetime(dense_datetimes[-1])
+                    is_lbm_held_constant = pd.Timestamp(current_date) > pd.Timestamp(last_lbm_date)
                     
                     col1, col2, col3 = st.columns(3)
                     
