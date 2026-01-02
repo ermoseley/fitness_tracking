@@ -1593,9 +1593,11 @@ def show_body_composition():
 
                 # Interpolate onto dense Kalman datetimes using absolute timestamps (seconds since epoch).
                 # Hold first/last values constant outside the measured range.
-                lbm_x = (lbm_dates.view('int64') / 1e9).to_numpy(dtype=float)  # seconds
+                # Convert datetimes to epoch seconds robustly across pandas/ndarray types.
+                # (Avoid calling .to_numpy() on a raw numpy.ndarray.)
+                lbm_x = (pd.to_datetime(lbm_dates, errors='coerce').astype('int64').to_numpy(dtype=float) / 1e9)  # seconds
                 dense_ts = pd.to_datetime(dense_datetimes, errors='coerce')
-                dense_x = (dense_ts.view('int64') / 1e9).to_numpy(dtype=float)
+                dense_x = (pd.Series(dense_ts).astype('int64').to_numpy(dtype=float) / 1e9)
                 lbm_interp_values = np.interp(dense_x, lbm_x, lbm_values, left=float(lbm_values[0]), right=float(lbm_values[-1]))
                 
                 # Calculate body fat percentages for dense Kalman data
