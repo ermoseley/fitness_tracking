@@ -119,8 +119,10 @@ class WeightKalmanFilter:
         # Adapt measurement noise from innovation statistics (pre-update)
         if self.adaptive_measurement_noise:
             # S_est ≈ y^2, so R_est ≈ S_est - HPH^T
-            S_est = float(y @ y.T)
-            HPH = float(self.H @ self.P @ self.H.T)
+            # NOTE: (y @ y.T) and (H P H^T) are 1x1 arrays; extract scalar with .item()
+            # Avoids: "only 0-dimensional arrays can be converted to Python scalars"
+            S_est = float((y @ y.T).item())
+            HPH = float((self.H @ self.P @ self.H.T).item())
             R_est = max(1e-8, S_est - HPH)
             self.R_adapt = (1.0 - self.R_alpha) * self.R_adapt + self.R_alpha * R_est
             self.R = np.array([[self.R_adapt]], dtype=float)
